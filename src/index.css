@@ -1,1 +1,112 @@
 @import "tailwindcss";
+
+@theme {
+  --font-display: "Chakra Petch", ui-sans-serif, sans-serif;
+  --font-body: "IBM Plex Sans", ui-sans-serif, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  --color-ink: #06090f;
+  --color-abyss: #0a101a;
+  --color-panel: #0c1522;
+  --color-panel2: #111d2e;
+  --color-raise: #16263a;
+  --color-line: #1c2d42;
+  --color-line2: #2c445f;
+  --color-fog: #7f97b0;
+  --color-dim: #54687e;
+  --color-snow: #dce8f5;
+  --color-cy: #4fd8eb;
+  --color-cyd: #1899b4;
+  --color-am: #ffb454;
+  --color-rd: #ff5d5d;
+  --color-gn: #55e09c;
+  --color-tl: #45d0b8;
+  --color-vio: #9d8cff;
+  --color-or: #ff8a3d;
+}
+
+html, body, #root { height: 100%; }
+
+body {
+  background-color: var(--color-ink);
+  color: var(--color-snow);
+  font-family: var(--font-body);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection { background: rgba(79, 216, 235, 0.28); color: #eaf6ff; }
+
+* { scrollbar-width: thin; scrollbar-color: #223850 transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: #223850; border-radius: 4px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+.tabular { font-variant-numeric: tabular-nums; }
+
+/* ---------- ambient layers ---------- */
+.amb-grid {
+  background-image:
+    linear-gradient(rgba(79, 216, 235, 0.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(79, 216, 235, 0.028) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
+.scanlines {
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg, rgba(255, 255, 255, 0.022) 0px, rgba(255, 255, 255, 0.022) 1px,
+    transparent 1px, transparent 3px);
+  mix-blend-mode: overlay;
+}
+.vignette {
+  pointer-events: none;
+  background: radial-gradient(ellipse 120% 90% at 50% 40%, transparent 55%, rgba(3, 6, 11, 0.62) 100%);
+}
+
+/* ---------- keyframes ---------- */
+@keyframes sweep { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes blinker { 0%, 55% { opacity: 1; } 56%, 100% { opacity: 0.12; } }
+@keyframes pulse-soft { 0%, 100% { opacity: 0.95; } 50% { opacity: 0.45; } }
+@keyframes marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@keyframes fadeup { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes ringping {
+  0% { transform: scale(0.35); opacity: 0.9; }
+  80% { opacity: 0; }
+  100% { transform: scale(1.9); opacity: 0; }
+}
+@keyframes dashcrawl { to { stroke-dashoffset: -26; } }
+@keyframes bootbar { from { width: 4%; } to { width: 100%; } }
+@keyframes flicker { 0%,100%{opacity:1} 92%{opacity:1} 93%{opacity:.6} 94%{opacity:1} 97%{opacity:.8} 98%{opacity:1} }
+
+.anim-fadeup { animation: fadeup 0.34s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.anim-pulse-soft { animation: pulse-soft 2.2s ease-in-out infinite; }
+.anim-blink { animation: blinker 1.1s steps(1) infinite; }
+.anim-flicker { animation: flicker 6s linear infinite; }
+
+.marquee-track { animation: marquee 46s linear infinite; }
+.marquee-track:hover { animation-play-state: paused; }
+
+.dash-crawl { stroke-dasharray: 7 6; animation: dashcrawl 1.4s linear infinite; }
+
+.radar-sweep {
+  background: conic-gradient(from 0deg, rgba(79, 216, 235, 0.55), rgba(79, 216, 235, 0.06) 26%, transparent 30%);
+  animation: sweep 3.6s linear infinite;
+}
+
+/* ---------- controls ---------- */
+input[type="range"] { -webkit-appearance: none; appearance: none; height: 4px; border-radius: 2px; background: #223850; outline: none; }
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 13px; height: 13px; border-radius: 2px;
+  background: #4fd8eb; border: 1px solid #0a101a; box-shadow: 0 0 8px rgba(79, 216, 235, 0.6);
+  cursor: pointer; transform: rotate(45deg);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 12px; height: 12px; border-radius: 2px; background: #4fd8eb;
+  border: 1px solid #0a101a; cursor: pointer; transform: rotate(45deg);
+}
+
+input, select, textarea { outline: none; }
+select option { background: #0c1522; color: #dce8f5; }
+
+button { cursor: pointer; }
+button:active { transform: translateY(1px); }
