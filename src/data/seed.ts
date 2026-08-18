@@ -16,27 +16,53 @@ export const CITIES: { n: string; p: [number, number] }[] = [
   { n: "SEOUL", p: [37.57, 126.98] }, { n: "PARIS", p: [48.86, 2.35] },
   { n: "NAIROBI", p: [-1.29, 36.82] }, { n: "ANCHORAGE", p: [61.22, -149.9] },
   { n: "SANTIAGO", p: [-33.45, -70.67] }, { n: "REYKJAVIK", p: [64.15, -21.94] },
+  { n: "DELHI", p: [28.61, 77.21] }, { n: "BENGALURU", p: [12.97, 77.59] },
+  { n: "KOLKATA", p: [22.57, 88.36] }, { n: "CHENNAI", p: [13.08, 80.27] },
+  { n: "HYDERABAD", p: [17.38, 78.49] }, { n: "KATHMANDU", p: [27.72, 85.32] },
+  { n: "COLOMBO", p: [6.93, 79.85] }, { n: "KARACHI", p: [24.86, 67.01] },
+  { n: "DHAKA", p: [23.81, 90.41] },
 ];
 
 const AC_TYPES = ["A350-900", "B77W", "B788", "A320neo", "C-130J", "G650ER", "A400M", "B738", "KC-46A", "E-145"];
 
-function mkFlight(i: number): Flight {
-  const a = CITIES[Math.floor(rnd(0, CITIES.length))];
+export const INDIA_PAIRS: [string, string][] = [
+  ["DELHI", "MUMBAI"], ["BENGALURU", "DELHI"], ["KOLKATA", "CHENNAI"],
+  ["DUBAI", "DELHI"], ["SINGAPORE", "BENGALURU"], ["LONDON", "DELHI"],
+  ["MUMBAI", "KOLKATA"], ["HYDERABAD", "SINGAPORE"], ["TOKYO", "DELHI"],
+  ["DELHI", "CHENNAI"], ["KATHMANDU", "DELHI"], ["COLOMBO", "MUMBAI"],
+  ["DHAKA", "KOLKATA"], ["KARACHI", "DUBAI"],
+];
+
+function mkFlight(i: number, pair?: [string, string]): Flight {
+  let a = CITIES[Math.floor(rnd(0, CITIES.length))];
   let b = CITIES[Math.floor(rnd(0, CITIES.length))];
+  if (pair) {
+    a = CITIES.find((c) => c.n === pair[0]) ?? a;
+    b = CITIES.find((c) => c.n === pair[1]) ?? b;
+  }
   while (b.n === a.n) b = CITIES[Math.floor(rnd(0, CITIES.length))];
-  const mil = i % 4 === 0;
+  const india = pair !== undefined;
+  const mil = !india && i % 4 === 0;
   const t = rnd(0.05, 0.9);
   const [lat, lon] = lerpPos(a.p, b.p, t);
+  const intl = india && ["DUBAI", "SINGAPORE", "LONDON", "TOKYO", "DUBAI"].includes(pair[0]);
   return {
-    id: `FL${100 + i}`, cs: mil ? `RCH${720 + i}` : `${["DLH", "UAE", "BAW", "SIA", "AFR", "QTR"][i % 6]}${100 + i * 7}`,
-    type: mil ? ["C-130J", "A400M", "KC-46A"][i % 3] : AC_TYPES[i % AC_TYPES.length],
-    from: a.n, to: b.n, lat, lon, alt: mil ? rnd(28, 34) * 1000 : rnd(32, 41) * 1000,
+    id: `FL${100 + i}`,
+    cs: mil ? `RCH${720 + i}` : india
+      ? `${["AIC", "IGO", "VTI", "AIX"][i % 4]}${140 + i * 13}`
+      : `${["DLH", "UAE", "BAW", "SIA", "AFR", "QTR"][i % 6]}${100 + i * 7}`,
+    type: mil ? ["C-130J", "A400M", "KC-46A"][i % 3]
+      : india ? (intl ? ["B788", "B77W", "A350-900"][i % 3] : ["A320neo", "A321neo", "B738"][i % 3])
+      : AC_TYPES[i % AC_TYPES.length],
+    from: a.n, to: b.n, lat, lon, alt: mil ? rnd(28, 34) * 1000 : india ? rnd(29, 40) * 1000 : rnd(32, 41) * 1000,
     spd: rnd(430, 520), hdg: 0, t, a: a.p, b: b.p, mil,
   };
 }
 
 export function seedFlights(): Flight[] {
-  return Array.from({ length: 16 }, (_, i) => mkFlight(i));
+  const base = Array.from({ length: 14 }, (_, i) => mkFlight(i));
+  const india = INDIA_PAIRS.map((p, i) => mkFlight(40 + i, p));
+  return [...base, ...india];
 }
 export { mkFlight };
 

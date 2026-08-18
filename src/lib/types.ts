@@ -1,7 +1,8 @@
-export type View = "ops" | "feed" | "recon" | "entities" | "missions" | "watch";
+export type View = "ops" | "feed" | "recon" | "entities" | "missions" | "watch" | "analytics";
+export type AnalyticsSection = "all" | "adsb" | "maritime" | "satellite" | "seismic" | "news" | "fusion";
 export type LayerKey = "flights" | "ships" | "sats" | "cams" | "quakes" | "conflicts" | "fires";
 
-export type SourceKey = "USGS" | "EONET" | "GDELT" | "OPENSKY" | "CELESTRAK" | "BLOCKCHAIR";
+export type SourceKey = "USGS" | "EONET" | "GDELT" | "OPENSKY" | "CELESTRAK" | "AISSTREAM" | "BLOCKCHAIR";
 export type SourceState = "CONNECTING" | "LIVE" | "SIM" | "ERROR" | "STANDBY";
 
 export interface Flight {
@@ -13,6 +14,7 @@ export interface Flight {
 export interface Ship {
   id: string; name: string; cls: string; lat: number; lon: number;
   spd: number; hdg: number; flag: string;
+  live?: boolean; mmsi?: number;
 }
 export interface Sat {
   id: string; name: string; lat: number; lon: number; inc: number;
@@ -62,6 +64,13 @@ export interface Alert { id: string; t: number; sev: "INFO" | "WARN" | "CRIT"; m
 
 export interface Sel { kind: LayerKey | "uav"; id: string }
 
+export interface StatsSeries {
+  t: number[];
+  flights: number[]; ships: number[]; sats: number[]; quakes: number[]; fires: number[];
+  ingest: number[]; fusion: number[]; correlated: number[]; liveRatio: number[];
+  darkShips: number[]; sentPos: number[]; sentNeg: number[]; sentNeu: number[]; newsRate: number[];
+}
+
 export interface SimState {
   t: number;
   flights: Flight[]; ships: Ship[]; sats: Sat[]; cams: Cam[];
@@ -69,4 +78,5 @@ export interface SimState {
   news: NewsItem[]; newsIdx: number; logs: string[];
   uavs: Uav[]; geofenceR: number;
   rules: WatchRule[]; alerts: Alert[]; tension: number[];
+  stats: StatsSeries;
 }

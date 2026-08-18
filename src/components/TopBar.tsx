@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { Settings } from "lucide-react";
 import { useStore } from "../state/store";
 import { Dot } from "./ui";
+import SettingsModal from "./SettingsModal";
 import { SOURCE_META } from "../lib/live";
 import type { SourceState } from "../lib/types";
 
@@ -35,11 +37,12 @@ function Clock() {
 }
 
 export default function TopBar() {
-  const { threat, setThreat, sim } = useStore();
+  const { threat, setThreat, sim, setSettingsOpen } = useStore();
   const packets = 1284331 + sim.t * 412 + (sim.t % 7) * 31;
   const t = THREATS[threat];
 
   return (
+    <>
     <header className="h-12 shrink-0 flex items-stretch border-b border-line bg-panel/90 relative z-30">
       {/* brand */}
       <div className="flex items-center gap-2.5 pl-3 pr-4 border-r border-line">
@@ -69,6 +72,14 @@ export default function TopBar() {
 
       <div className="flex-1" />
 
+      {/* uplink configuration */}
+      <div className="hidden md:flex items-center border-l border-line px-3">
+        <button onClick={() => setSettingsOpen(true)} title="Uplink configuration · AIS key"
+          className="w-8 h-8 border border-line2 text-fog hover:text-cy hover:border-cy/50 hover:shadow-[0_0_12px_rgba(79,216,235,0.2)] flex items-center justify-center transition-all">
+          <Settings size={14} />
+        </button>
+      </div>
+
       {/* threat condition */}
       <div className="hidden md:flex items-center gap-2 pr-4 border-l border-line pl-4">
         <span className="font-mono text-[9px] text-dim tracking-[0.2em]">THREATCON</span>
@@ -96,5 +107,7 @@ export default function TopBar() {
       {/* threat strip glow */}
       <div className={`absolute bottom-0 left-0 right-0 h-px ${t.bg} opacity-40`} />
     </header>
+    <SettingsModal />
+    </>
   );
 }
