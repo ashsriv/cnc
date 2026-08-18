@@ -82,13 +82,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       },
     }));
 
-  /** union live flights from multiple feeds, dedup by hex, keep synthetic only if nothing live */
+  /** union live flights from multiple feeds, dedup by hex, prune stale, backfill if thin */
   const mergeFlights = (fresh: Flight[], prev: Flight[]) => {
+    const now = Date.now();
     const map = new Map<string, Flight>();
-    for (const f of prev) if (f.live) map.set(f.id.toLowerCase(), f);
+    for (const f of prev) if (f.live && (!f.seen || now - f.seen < 75000)) map.set(f.id.toLowerCase(), f);
     for (const f of fresh) map.set(f.id.toLowerCase(), f);
     if (map.size === 0) return prev;
-    return Array.from(map.values()).slice(0, 150);
+    const live = Array.from(map.values()).slice(0, 280);
+    if (live.length < 30) {
+      const synth = prev.filter((f) => !f.live).slice(0, 30 - live.length);
+      return [...live, ...synth];
+    }
+    return live;
   };
 
   const mutateSim = (fn: (s: SimState) => SimState) => setSim((s) => fn(s));

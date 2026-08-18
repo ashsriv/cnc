@@ -158,42 +158,52 @@ export const ADL_BOXES = {
 };
 
 export async function fetchAdlFlights(): Promise<Flight[]> {
-  const urls = [
-    `https://globe.airplanes.live/re-api/?json&box=${ADL_BOXES.INDIA}`,
-    `https://globe.airplanes.live/re-api/?json&box=${ADL_BOXES.EUROPE}`,
-  ];
-  const out: Flight[] = [];
-  const seen = new Set<string>();
-  for (let i = 0; i < urls.length; i++) {
-    const j = await getJSON(urls[i], 9000);
-    const ac: any[] = j?.aircraft ?? j?.ac ?? [];
-    if (!ac.length) continue;
-    for (const a of ac) {
-      const hex = String(a.hex ?? "").toLowerCase();
-      if (!hex || seen.has(hex) || a.lat == null || a.lon == null) continue;
-      seen.add(hex);
-      const cs = String(a.flight ?? "").trim();
-      out.push({
-        id: hex,
-        cs: cs || hex.toUpperCase(),
-        type: a.t ? String(a.t) : "ADL LIVE",
-        from: a.r ? String(a.r) : "—",
-        to: "—",
-        lat: +a.lat, lon: +a.lon,
-        alt: typeof a.alt_baro === "number" ? a.alt_baro : 0,
-        spd: typeof a.gs === "number" ? +a.gs : 0,
-        hdg: typeof a.track === "number" ? a.track : 0,
-        t: 0,
-        a: [+a.lon, +a.lat], b: [+a.lon, +a.lat],
-        mil: a.mil === true || /^(RCH|NAVY|USN|USAF|USMC|CG|NATO|IAF|RAF|RAAF|IN\d)/i.test(cs),
-        live: true,
-      });
-      if (out.length >= 130) return out;
-    }
-    // India box saturated — skip the EU box to stay inside quota
-    if (i === 0 && out.length > 45) break;
+  const now = Date.now();
+  let ac: any[] = [];
+  // 1) light re-api JSON pass — operator India box + EU corroboration box
+  for (const box of [ADL_BOXES.INDIA, ADL_BOXES.EUROPE]) {
+    try {
+      const j = await getJSON(`https://globe.airplanes.live/re-api/?json&box=${box}`, 12000);
+      const list: any[] = j?.aircraft ?? j?.ac ?? [];
+      if (list.length) { ac = ac.concat(list); if (ac.length > 240) break; }
+    } catch { /* fall through to globe snapshot */ }
   }
-  if (out.length === 0) throw new Error("adl unreachable");
+  // 2) guaranteed-JSON fallback: the globe's own full snapshot, box-filtered client-side
+  //    box param order is lat,lon,lat,lon
+  if (ac.length < 10) {
+    const j = await getJSON("https://globe.airplanes.live/data/aircraft.json", 22000);
+    const all: any[] = j?.aircraft ?? j?.ac ?? [];
+    const inBox = (a: any, b: string) => {
+      const [la0, lo0, la1, lo1] = b.split(",").map(Number);
+      return a.lat != null && a.lon != null && a.lat >= la0 && a.lat <= la1 && a.lon >= lo0 && a.lon <= lo1;
+    };
+    ac = all.filter((a) => inBox(a, ADL_BOXES.INDIA) || inBox(a, ADL_BOXES.EUROPE));
+  }
+  if (!ac.length) throw new Error("adl unreachable");
+  const out: Flight[] = [];
+  const seenHex = new Set<string>();
+  for (const a of ac) {
+    const hex = String(a.hex ?? "").toLowerCase();
+    if (!hex || seenHex.has(hex) || a.lat == null || a.lon == null) continue;
+    seenHex.add(hex);
+    const cs = String(a.flight ?? "").trim();
+    out.push({
+      id: hex,
+      cs: cs || hex.toUpperCase(),
+      type: a.t ? String(a.t) : "ADL LIVE",
+      from: a.r ? String(a.r) : "—",
+      to: "—",
+      lat: +a.lat, lon: +a.lon,
+      alt: typeof a.alt_baro === "number" ? a.alt_baro : 0,
+      spd: typeof a.gs === "number" ? +a.gs : 0,
+      hdg: typeof a.track === "number" ? a.track : 0,
+      t: 0,
+      a: [+a.lon, +a.lat], b: [+a.lon, +a.lat],
+      mil: a.mil === true || /^(RCH|NAVY|USN|USAF|USMC|CG|NATO|IAF|RAF|RAAF|IN\d)/i.test(cs),
+      live: true,
+      seen: now,
+    });
+  }
   return out;
 }
 
@@ -216,6 +226,7 @@ function mapOpenSkyStates(states: any[][], out: Flight[], cap: number) {
       a: [lon, lat], b: [lon, lat],
       mil: /^(RCH|NAVY|USN|USAF|USMC|CG|AF[0-9]|NATO|IAF)/i.test(callsign),
       live: true,
+      seen: Date.now(),
     });
     if (out.length >= cap) break;
   }
@@ -230,7 +241,7 @@ export async function fetchFlights(): Promise<Flight[]> {
   const results = await Promise.allSettled(boxes.map((u) => getJSON(u)));
   const out: Flight[] = [];
   results.forEach((r, i) => {
-    if (r.status === "fulfilled") mapOpenSkyStates(r.value.states ?? [], out, i === 0 ? 48 : 40);
+    if (r.status === "fulfilled") mapOpenSkyStates(r.value.states ?? [], out, i === 0 ? 70 : 70);
     else throw new Error("opensky box failed");
   });
   if (out.length === 0) throw new Error("opensky unreachable");
