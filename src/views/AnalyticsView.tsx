@@ -6,6 +6,7 @@ import {
 import { Radar as RadarIcon } from "lucide-react";
 import { useStore } from "../state/store";
 import { Panel, Tag, Spark } from "../components/ui";
+import { SOURCE_META } from "../lib/live";
 import type { AnalyticsSection } from "../lib/types";
 
 const CY = "#4fd8eb", TL = "#45d0b8", VIO = "#9d8cff", AM = "#ffb454", RD = "#ff5d5d", GN = "#55e09c", OR = "#ff8a3d", FOG = "#7f97b0";
@@ -65,7 +66,7 @@ function Kpi({ label, value, unit, sub, tone = "text-snow", spark, sparkTone = C
 }
 
 export default function AnalyticsView() {
-  const { sim, sources } = useStore();
+  const { sim, sources, feedTelemetry } = useStore();
   const [sec, setSec] = useState<AnalyticsSection>("all");
   const st = sim.stats;
 
@@ -509,7 +510,7 @@ export default function AnalyticsView() {
           <div className={grid12}>
             <div className="col-span-3"><Kpi label="FUSION CONFIDENCE" value={last(st.fusion).toFixed(1)} unit="%" tone="text-cy" sub="composite agreement" spark={st.fusion} /></div>
             <div className="col-span-3"><Kpi label="CORRELATED EVENTS" value={corrTotal} tone="text-vio" sub="90-tick window" spark={st.correlated} sparkTone={VIO} /></div>
-            <div className="col-span-3"><Kpi label="DOMAINS ONLINE" value={`${coverage.filter((c) => c.src === "LIVE" || c.src === "SIM").length}/6`} sub={coverage.filter((c) => c.src === "LIVE").length + " on live wire"} /></div>
+            <div className="col-span-3"><Kpi label="DOMAINS ONLINE" value={`${coverage.filter((c) => c.src === "LIVE" || c.src === "SIM").length}/${coverage.length}`} sub={coverage.filter((c) => c.src === "LIVE").length + " on live wire"} /></div>
             <div className="col-span-3"><Kpi label="LIVE RECORD RATIO" value={`${last(st.liveRatio).toFixed(0)}%`} tone="text-gn" sub="off-wire vs synthetic" spark={st.liveRatio} sparkTone={GN} /></div>
 
             <div className="col-span-8">
@@ -544,6 +545,39 @@ export default function AnalyticsView() {
                     </div>
                   </div>
                 ))}
+              </Panel>
+            </div>
+
+            <div className="col-span-12">
+              <Panel title="FEED SUPERVISOR · INGEST PIPELINE TELEMETRY" pad={false}
+                right={<Tag tone="gn">{Object.values(feedTelemetry).filter((v) => v.ok).length} FEEDS HOT</Tag>}>
+                <table className="w-full">
+                  <thead><tr className="font-mono text-[8.5px] text-dim tracking-[0.15em] bg-panel2/60">
+                    <th className="text-left font-normal px-3 py-1.5">SOURCE</th>
+                    <th className="text-left font-normal py-1.5">PIPELINE</th>
+                    <th className="text-left font-normal py-1.5">STATE</th>
+                    <th className="text-right font-normal py-1.5">MSGS INGESTED</th>
+                    <th className="text-right font-normal py-1.5 pr-3">LATENCY</th>
+                  </tr></thead>
+                  <tbody>
+                    {SOURCE_META.map((m) => {
+                      const t = feedTelemetry[m.k];
+                      const state = sources[m.k] ?? "STANDBY";
+                      return (
+                        <tr key={m.k} className="border-t border-line/50 hover:bg-panel2/40 transition-colors">
+                          <td className="px-3 py-1.5 font-mono text-[10px] text-snow">{m.label}</td>
+                          <td className="py-1.5 font-mono text-[9px] text-dim">{m.feed}</td>
+                          <td className="py-1.5">{statusTag(state)}</td>
+                          <td className="py-1.5 text-right font-mono text-[10px] tabular text-cy">{t && t.msgs > 0 ? t.msgs.toLocaleString("en-US") : "—"}</td>
+                          <td className="py-1.5 pr-3 text-right font-mono text-[10px] tabular text-fog">{t?.lat ? `${t.lat} ms` : "—"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <div className="px-3 py-1.5 border-t border-line font-mono text-[8.5px] text-dim">
+                  Every poll is timed and counted by the ingest supervisor · failed polls flip the pipeline to the synthetic engine without dropping the fusion bus
+                </div>
               </Panel>
             </div>
 

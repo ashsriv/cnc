@@ -14,7 +14,9 @@ import AnalyticsView from "./views/AnalyticsView";
 const BOOT_LINES = [
   "AEGIS C2 KERNEL 4.2.1 — secure boot verified",
   "mounting sensor mesh … 14/14 relays online",
-  "live uplinks: USGS · EONET · GDELT · OPENSKY · CELESTRAK",
+  "live uplinks: ADL re-api · USGS · EONET · GDELT · OPENSKY · CELESTRAK",
+  "ADL India corridor armed · −0.10° → 99.56°E · 15 s cadence",
+  "persistence vault mounted · rules + alert history durable",
   "synthetic fallback armed for unreachable feeds",
   "loading basemap · Natural Earth 110m … OK",
   "correlation engine seeded · 2,412 entities",

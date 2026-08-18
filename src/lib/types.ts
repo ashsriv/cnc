@@ -2,7 +2,8 @@ export type View = "ops" | "feed" | "recon" | "entities" | "missions" | "watch" 
 export type AnalyticsSection = "all" | "adsb" | "maritime" | "satellite" | "seismic" | "news" | "fusion";
 export type LayerKey = "flights" | "ships" | "sats" | "cams" | "quakes" | "conflicts" | "fires";
 
-export type SourceKey = "USGS" | "EONET" | "GDELT" | "OPENSKY" | "CELESTRAK" | "AISSTREAM" | "BLOCKCHAIR";
+export type SourceKey = "USGS" | "EONET" | "GDELT" | "OPENSKY" | "ADL" | "CELESTRAK" | "AISSTREAM" | "BLOCKCHAIR";
+export interface FeedTelemetry { msgs: number; lat: number; ok: boolean; }
 export type SourceState = "CONNECTING" | "LIVE" | "SIM" | "ERROR" | "STANDBY";
 
 export interface Flight {
