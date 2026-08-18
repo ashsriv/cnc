@@ -1,10 +1,14 @@
 export type View = "ops" | "feed" | "recon" | "entities" | "missions" | "watch";
 export type LayerKey = "flights" | "ships" | "sats" | "cams" | "quakes" | "conflicts" | "fires";
 
+export type SourceKey = "USGS" | "EONET" | "GDELT" | "OPENSKY" | "CELESTRAK" | "BLOCKCHAIR";
+export type SourceState = "CONNECTING" | "LIVE" | "SIM" | "ERROR" | "STANDBY";
+
 export interface Flight {
   id: string; cs: string; type: string; from: string; to: string;
   lat: number; lon: number; alt: number; spd: number; hdg: number; t: number;
   a: [number, number]; b: [number, number]; mil: boolean;
+  live?: boolean;
 }
 export interface Ship {
   id: string; name: string; cls: string; lat: number; lon: number;
@@ -13,19 +17,22 @@ export interface Ship {
 export interface Sat {
   id: string; name: string; lat: number; lon: number; inc: number;
   phase: number; spd: number; altKm: number; kind: string;
+  live?: boolean;
+  trail?: [number, number][];
 }
 export interface Cam {
   id: string; name: string; lat: number; lon: number; online: boolean;
   viewers: number; fps: number; region: string;
 }
-export interface Quake { id: string; lat: number; lon: number; mag: number; depth: number; age: number; place: string; }
+export interface Quake { id: string; lat: number; lon: number; mag: number; depth: number; age: number; place: string; live?: boolean; }
 export interface Conflict { id: string; name: string; lat: number; lon: number; rKm: number; intensity: number; trend: number; }
-export interface Fire { id: string; name: string; lat: number; lon: number; mw: number; areaKm: number; }
+export interface Fire { id: string; name: string; lat: number; lon: number; mw: number; areaKm: number; live?: boolean; }
 
 export interface NewsItem {
   id: string; t: number; source: string; region: string;
   priority: "FLASH" | "PRIORITY" | "ROUTINE";
   sentiment: number; title: string; body: string; coords?: [number, number];
+  live?: boolean;
 }
 
 export interface Waypoint { lat: number; lon: number; alt: number; spd: number; action: string; }

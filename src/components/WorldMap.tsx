@@ -218,12 +218,16 @@ export default function WorldMap({ mission, heightClass = "h-full" }: { mission?
             const p = P(sa.lon, sa.lat); if (!p) return null;
             // short predicted ground track
             const trail: string[] = [];
-            for (let i = 1; i <= 12; i++) {
-              const ph = sa.phase + sa.spd * 0.02 * i;
-              const lo = sa.lon + 1.15 * i;
-              const la = clamp(sa.inc > 90 ? sa.inc - 180 + (180 - sa.inc) * 2 * Math.sin(ph) : sa.inc * Math.sin(ph), -85, 85);
-              const tp = P(((lo + 180) % 360) - 180, la);
-              if (tp) trail.push(`${tp[0]},${tp[1]}`);
+            if (sa.trail?.length) {
+              for (const [lo, la] of sa.trail) { const tp = P(lo, la); if (tp) trail.push(`${tp[0]},${tp[1]}`); }
+            } else {
+              for (let i = 1; i <= 12; i++) {
+                const ph = sa.phase + sa.spd * 0.02 * i;
+                const lo = sa.lon + 1.15 * i;
+                const la = clamp(sa.inc > 90 ? sa.inc - 180 + (180 - sa.inc) * 2 * Math.sin(ph) : sa.inc * Math.sin(ph), -85, 85);
+                const tp = P(((lo + 180) % 360) - 180, la);
+                if (tp) trail.push(`${tp[0]},${tp[1]}`);
+              }
             }
             return (
               <g key={sa.id} className="cursor-pointer" onClick={(e) => { e.stopPropagation(); select({ kind: "sats", id: sa.id }); }}>

@@ -140,7 +140,10 @@ export default function OpsView() {
             </div>
           ) : (
             <div className="anim-fadeup">
-              <div className={`font-display font-bold text-[14px] tracking-wide mb-2 ${{ cy: "text-cy", tl: "text-tl", vio: "text-vio", am: "text-am", rd: "text-rd", or: "text-or", gn: "text-gn" }[selDetail.tone]}`}>{selDetail.title}</div>
+              <div className={`font-display font-bold text-[14px] tracking-wide mb-2 ${{ cy: "text-cy", tl: "text-tl", vio: "text-vio", am: "text-am", rd: "text-rd", or: "text-or", gn: "text-gn" }[selDetail.tone]} flex items-center gap-2`}>
+                {selDetail.title}
+                {sel && (sim as any)[sel.kind]?.find?.((x: any) => x.id === sel.id)?.live && <Tag tone="gn"><span className="anim-pulse-soft">●</span>&nbsp;LIVE DATA</Tag>}
+              </div>
               {selDetail.rows.map(([k, v]) => <Kv key={k} k={k} v={v} />)}
               <div className="flex gap-2 mt-3">
                 <button onClick={() => {
