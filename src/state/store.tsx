@@ -1,8 +1,9 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import type { SimState, View, LayerKey, Sel, UavMode, Waypoint, Rally, WatchRule, Alert, SourceKey, SourceState, Ship } from "../lib/types";
+import type { SimState, View, LayerKey, Sel, UavMode, Waypoint, Rally, WatchRule, Alert, SourceKey, SourceState, Ship, Flight, FeedTelemetry } from "../lib/types";
 import { initSim, stepSim } from "../lib/sim";
 import { hexId } from "../lib/geo";
-import { initState, fetchQuakes, fetchFires, fetchNews, fetchFlights, fetchSatRecs, propagateSats, type SatRec } from "../lib/live";
+import { initState, fetchQuakes, fetchFires, fetchNews, fetchFlights, fetchAdlFlights, fetchSatRecs, propagateSats, type SatRec } from "../lib/live";
+import { loadVault, saveVault } from "../services/vault";
 
 interface Store {
   sim: SimState;
@@ -24,6 +25,7 @@ interface Store {
   focus: { lat: number; lon: number; k: number } | null; setFocus: (f: { lat: number; lon: number; k: number } | null) => void;
   sources: Record<SourceKey, SourceState>;
   setSource: (k: SourceKey, v: SourceState) => void;
+  feedTelemetry: Record<string, FeedTelemetry>;
   aisKey: string; saveAisKey: (k: string) => void;
   aisRegions: string[]; toggleAisRegion: (r: string) => void;
   settingsOpen: boolean; setSettingsOpen: (v: boolean) => void;
@@ -44,11 +46,21 @@ export const AIS_REGIONS: Record<string, { label: string; box: string }> = {
 };
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const [sim, setSim] = useState<SimState>(() => initSim());
+  const [sim, setSim] = useState<SimState>(() => {
+    const base = initSim();
+    const v = loadVault();
+    if (v) {
+      if (Array.isArray(v.rules) && v.rules.length) base.rules = v.rules.slice(0, 40);
+      if (Array.isArray(v.alerts) && v.alerts.length) base.alerts = v.alerts.slice(0, 40);
+      if (typeof v.geofenceR === "number" && v.geofenceR >= 100) base.geofenceR = v.geofenceR;
+      base.logs = [...base.logs, `[VAULT] session restored · ${v.rules?.length ?? 0} rules · ${v.alerts?.length ?? 0} alerts · geofence ${base.geofenceR}km`];
+    }
+    return base;
+  });
   const [view, setView] = useState<View>("ops");
   const [layers, setLayers] = useState(DEFAULT_LAYERS);
   const [sel, setSel] = useState<Sel | null>(null);
-  const [threat, setThreat] = useState(1);
+  const [threat, setThreat] = useState(() => loadVault()?.threat ?? 1);
   const [uavSel, setUavSel] = useState("UA01");
   const [focus, setFocus] = useState<{ lat: number; lon: number; k: number } | null>(null);
   const [sources, setSources] = useState<Record<SourceKey, SourceState>>(initState);
@@ -57,6 +69,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const srcRef = useRef(sources);
   srcRef.current = sources;
   const recsRef = useRef<SatRec[] | null>(null);
+
+  /* ---------------- feed supervisor (backend telemetry tier) ---------------- */
+  const [feedTelemetry, setFeedTelemetry] = useState<Record<string, FeedTelemetry>>({});
+  const reportFeed = (k: SourceKey, msgs: number, lat: number, ok: boolean) =>
+    setFeedTelemetry((p) => ({
+      ...p,
+      [k]: {
+        msgs: (p[k]?.msgs ?? 0) + (ok ? msgs : 0),
+        lat: ok ? Math.round(lat) : p[k]?.lat ?? 0,
+        ok,
+      },
+    }));
+
+  /** union live flights from multiple feeds, dedup by hex, keep synthetic only if nothing live */
+  const mergeFlights = (fresh: Flight[], prev: Flight[]) => {
+    const map = new Map<string, Flight>();
+    for (const f of prev) if (f.live) map.set(f.id.toLowerCase(), f);
+    for (const f of fresh) map.set(f.id.toLowerCase(), f);
+    if (map.size === 0) return prev;
+    return Array.from(map.values()).slice(0, 150);
+  };
 
   const mutateSim = (fn: (s: SimState) => SimState) => setSim((s) => fn(s));
   const logLine = (line: string) => mutateSim((s) => ({ ...s, logs: [...s.logs, line].slice(-70) }));
@@ -87,8 +120,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // USGS seismic — every 2 min
     const usgs = async () => {
       try {
+        const t0 = performance.now();
         const list = await fetchQuakes();
         if (stop) return;
+        reportFeed("USGS", list.length, performance.now() - t0, true);
         setSim((s) => ({
           ...s,
           quakes: [
@@ -97,37 +132,55 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           ].slice(0, 15),
         }));
         setSource("USGS", "LIVE");
-      } catch { if (!stop) setSource("USGS", "SIM"); }
+      } catch { if (!stop) { reportFeed("USGS", 0, 0, false); setSource("USGS", "SIM"); } }
     };
 
     // NASA EONET wildfires — every 3 min
     const eonet = async () => {
       try {
+        const t0 = performance.now();
         const list = await fetchFires();
         if (stop) return;
+        reportFeed("EONET", list.length, performance.now() - t0, true);
         setSim((s) => ({ ...s, fires: [...list, ...s.fires.filter((f) => !f.live)].slice(0, 14) }));
         setSource("EONET", "LIVE");
-      } catch { if (!stop) setSource("EONET", "SIM"); }
+      } catch { if (!stop) { reportFeed("EONET", 0, 0, false); setSource("EONET", "SIM"); } }
     };
 
     // GDELT news wire — every 100 s
     const gdelt = async () => {
       try {
+        const t0 = performance.now();
         const list = await fetchNews(simRef.current.t);
         if (stop) return;
+        reportFeed("GDELT", list.length, performance.now() - t0, true);
         setSim((s) => ({ ...s, news: [...list, ...s.news.filter((n) => !n.live)].slice(0, 60) }));
         setSource("GDELT", "LIVE");
-      } catch { if (!stop) setSource("GDELT", "SIM"); }
+      } catch { if (!stop) { reportFeed("GDELT", 0, 0, false); setSource("GDELT", "SIM"); } }
     };
 
-    // OpenSky ADS-B — every 45 s (anonymous tier limit 1 req / 15 s)
+    // airplanes.live re-api — PRIMARY ADS-B feed (India + EU boxes), every 15 s
+    const adl = async () => {
+      try {
+        const t0 = performance.now();
+        const list = await fetchAdlFlights();
+        if (stop) return;
+        reportFeed("ADL", list.length, performance.now() - t0, true);
+        setSim((s) => ({ ...s, flights: mergeFlights(list, s.flights) }));
+        setSource("ADL", "LIVE");
+      } catch { if (!stop) { reportFeed("ADL", 0, 0, false); setSource("ADL", "SIM"); } }
+    };
+
+    // OpenSky ADS-B — redundant corroboration feed, every 60 s
     const opensky = async () => {
       try {
+        const t0 = performance.now();
         const list = await fetchFlights();
         if (stop) return;
-        setSim((s) => ({ ...s, flights: list.length ? list : s.flights }));
+        reportFeed("OPENSKY", list.length, performance.now() - t0, true);
+        setSim((s) => ({ ...s, flights: mergeFlights(list, s.flights) }));
         setSource("OPENSKY", "LIVE");
-      } catch { if (!stop) setSource("OPENSKY", "SIM"); }
+      } catch { if (!stop) { reportFeed("OPENSKY", 0, 0, false); setSource("OPENSKY", "SIM"); } }
     };
 
     // CelesTrak TLEs — once
@@ -141,15 +194,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
 
     usgs(); eonet(); gdelt(); tle();
-    setTimeout(opensky, 1500);
+    setTimeout(adl, 1200);
+    setTimeout(opensky, 30000);
     const ids = [
       window.setInterval(usgs, 120000),
       window.setInterval(eonet, 180000),
       window.setInterval(gdelt, 100000),
-      window.setInterval(opensky, 45000),
+      window.setInterval(adl, 15000),
+      window.setInterval(opensky, 60000),
     ];
     return () => { stop = true; ids.forEach(clearInterval); };
   }, []);
+
+  /* ---------------- persistence vault — rules / alerts / config survive reloads ---------------- */
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      saveVault({ rules: sim.rules, alerts: sim.alerts, geofenceR: sim.geofenceR, threat });
+    }, 350);
+    return () => window.clearTimeout(id);
+  }, [sim.rules, sim.alerts, sim.geofenceR, threat]);
 
   /* ---------------- AISStream WebSocket (operator-supplied key) ---------------- */
   const [aisKey, setAisKey] = useState(() => localStorage.getItem("aegis_ais_key") ?? "");
@@ -242,6 +305,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     uavSel, setUavSel,
     focus, setFocus,
     sources, setSource,
+    feedTelemetry,
     aisKey, saveAisKey, aisRegions, toggleAisRegion, settingsOpen, setSettingsOpen,
     uavCmd: (id, cmd) =>
       mutateSim((s) => ({

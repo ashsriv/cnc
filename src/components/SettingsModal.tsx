@@ -10,7 +10,7 @@ const ST_TONE: Record<string, { tone: "gn" | "cy" | "am" | "rd" | "fog"; blink?:
 };
 
 export default function SettingsModal() {
-  const { settingsOpen, setSettingsOpen, aisKey, saveAisKey, aisRegions, toggleAisRegion, sources } = useStore();
+  const { settingsOpen, setSettingsOpen, aisKey, saveAisKey, aisRegions, toggleAisRegion, sources, feedTelemetry } = useStore();
   const [draft, setDraft] = useState<string | null>(null);
   const [reveal, setReveal] = useState(false);
   if (!settingsOpen) return null;
@@ -106,7 +106,9 @@ export default function SettingsModal() {
                 <div key={s.k} className="flex items-center gap-2 py-1.5 border-b border-line/40">
                   <Dot tone={state === "LIVE" ? "bg-gn" : state === "CONNECTING" ? "bg-am" : state === "ERROR" ? "bg-rd" : "bg-dim"} blink={state === "LIVE" || state === "CONNECTING"} />
                   <div className="min-w-0">
-                    <div className="font-mono text-[10px] text-snow">{s.label} <span className="text-dim">· {state}</span></div>
+                    <div className="font-mono text-[10px] text-snow">{s.label} <span className="text-dim">· {state}</span>
+                      {feedTelemetry[s.k]?.msgs ? <span className="text-dim tabular"> · {feedTelemetry[s.k].msgs.toLocaleString("en-US")} msg</span> : null}
+                    </div>
                     <div className="font-mono text-[8px] text-dim truncate">{s.feed}</div>
                   </div>
                 </div>

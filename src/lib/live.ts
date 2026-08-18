@@ -34,16 +34,17 @@ export const SOURCE_META: { k: SourceKey; label: string; feed: string }[] = [
   { k: "USGS", label: "USGS", feed: "Earthquake Hazards · M2.5+/24h" },
   { k: "EONET", label: "EONET", feed: "NASA natural events · wildfires" },
   { k: "GDELT", label: "GDELT", feed: "DOC 2.0 global news wire" },
-  { k: "OPENSKY", label: "OPENSKY", feed: "ADS-B live air traffic" },
+  { k: "OPENSKY", label: "OPENSKY", feed: "ADS-B live air traffic (redundant)" },
+  { k: "ADL", label: "ADL·IND", feed: "airplanes.live re-api · India + EU boxes" },
   { k: "CELESTRAK", label: "TLE/SGP4", feed: "CelesTrak orbits · propagated" },
   { k: "AISSTREAM", label: "AIS WS", feed: "AISStream WebSocket · operator key" },
   { k: "BLOCKCHAIR", label: "CHAIN", feed: "On-chain ledger queries" },
 ];
 
-export const ALL_SOURCES: SourceKey[] = ["USGS", "EONET", "GDELT", "OPENSKY", "CELESTRAK", "AISSTREAM", "BLOCKCHAIR"];
+export const ALL_SOURCES: SourceKey[] = ["USGS", "EONET", "GDELT", "ADL", "OPENSKY", "CELESTRAK", "AISSTREAM", "BLOCKCHAIR"];
 
 export function initState(): Record<SourceKey, SourceState> {
-  return { USGS: "CONNECTING", EONET: "CONNECTING", GDELT: "CONNECTING", OPENSKY: "CONNECTING", CELESTRAK: "CONNECTING", AISSTREAM: "STANDBY", BLOCKCHAIR: "STANDBY" };
+  return { USGS: "CONNECTING", EONET: "CONNECTING", GDELT: "CONNECTING", OPENSKY: "CONNECTING", ADL: "CONNECTING", CELESTRAK: "CONNECTING", AISSTREAM: "STANDBY", BLOCKCHAIR: "STANDBY" };
 }
 
 /* ------------------------------------------------------------------ */
@@ -144,6 +145,57 @@ export async function fetchNews(simTick: number): Promise<NewsItem[]> {
 /* ------------------------------------------------------------------ */
 /* OpenSky — live ADS-B                                                */
 /* ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------ */
+/* airplanes.live re-api — primary ADS-B feed (operator-supplied box) */
+/* JSON mode of the same endpoint that serves binCraft&zstd binary.   */
+/* ------------------------------------------------------------------ */
+
+export const ADL_BOXES = {
+  // exact operator-designated India corridor
+  INDIA: "-0.099935,41.918394,66.467603,99.555696",
+  EUROPE: "-11,34,35,58",
+};
+
+export async function fetchAdlFlights(): Promise<Flight[]> {
+  const urls = [
+    `https://globe.airplanes.live/re-api/?json&box=${ADL_BOXES.INDIA}`,
+    `https://globe.airplanes.live/re-api/?json&box=${ADL_BOXES.EUROPE}`,
+  ];
+  const out: Flight[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < urls.length; i++) {
+    const j = await getJSON(urls[i], 9000);
+    const ac: any[] = j?.aircraft ?? j?.ac ?? [];
+    if (!ac.length) continue;
+    for (const a of ac) {
+      const hex = String(a.hex ?? "").toLowerCase();
+      if (!hex || seen.has(hex) || a.lat == null || a.lon == null) continue;
+      seen.add(hex);
+      const cs = String(a.flight ?? "").trim();
+      out.push({
+        id: hex,
+        cs: cs || hex.toUpperCase(),
+        type: a.t ? String(a.t) : "ADL LIVE",
+        from: a.r ? String(a.r) : "—",
+        to: "—",
+        lat: +a.lat, lon: +a.lon,
+        alt: typeof a.alt_baro === "number" ? a.alt_baro : 0,
+        spd: typeof a.gs === "number" ? +a.gs : 0,
+        hdg: typeof a.track === "number" ? a.track : 0,
+        t: 0,
+        a: [+a.lon, +a.lat], b: [+a.lon, +a.lat],
+        mil: a.mil === true || /^(RCH|NAVY|USN|USAF|USMC|CG|NATO|IAF|RAF|RAAF|IN\d)/i.test(cs),
+        live: true,
+      });
+      if (out.length >= 130) return out;
+    }
+    // India box saturated — skip the EU box to stay inside quota
+    if (i === 0 && out.length > 45) break;
+  }
+  if (out.length === 0) throw new Error("adl unreachable");
+  return out;
+}
 
 function mapOpenSkyStates(states: any[][], out: Flight[], cap: number) {
   for (const st of states) {

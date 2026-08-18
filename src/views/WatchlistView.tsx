@@ -3,6 +3,7 @@ import { BellRing, Plus, Download } from "lucide-react";
 import { useStore } from "../state/store";
 import { Panel, Tag, Btn, Dot } from "../components/ui";
 import { agoLabel } from "../lib/geo";
+import { exportCsv } from "../services/vault";
 
 const ENTITIES = ["SEISMIC", "AIS", "ADS-B", "OFAC", "WALLET", "UAS", "GEOFENCE", "TELEGRAM", "FIRMS", "CCTV"];
 const METRICS = ["MAGNITUDE", "DARK PERIOD (H)", "MATCH SCORE (%)", "BATTERY (%)", "VELOCITY ($/H)", "BREACH", "VOLUME Δ (%)", "FRP (MW)", "VIEWERS Δ (%)"];
@@ -89,7 +90,15 @@ export default function WatchlistView() {
           </div>
           <div className="px-3 py-2 border-t border-line bg-panel2/50 flex items-center justify-between">
             <span className="font-mono text-[9px] text-dim">Rules evaluate on every fusion cycle · escalation routes: CONSOLE → ALERT → WIRE</span>
-            <Btn small tone={exported ? "gn" : "fog"} onClick={() => { setExported(true); log("[WATCH] watchlist exported to evidence vault · SHA-256 sealed"); setTimeout(() => setExported(false), 2000); }}>
+            <Btn small tone={exported ? "gn" : "fog"} onClick={() => {
+  exportCsv("aegis-watchlist.csv",
+    ["kind", "id", "state", "detail", "value"],
+    [
+      ...sim.rules.map((r) => ["RULE", r.id, r.active ? "ARMED" : "STANDBY", `${r.entity} ${r.metric} ${r.op} ${r.threshold}`, r.triggered ? "TRIGGERED" : "WATCHING"]),
+      ...sim.alerts.map((a) => ["ALERT", a.id, a.sev, a.msg, a.t]),
+    ]);
+  setExported(true); log("[WATCH] evidence file written · aegis-watchlist.csv (rules + alert history)"); setTimeout(() => setExported(false), 2200);
+}}>
               <span className="flex items-center gap-1"><Download size={10} /> {exported ? "SEALED ✓" : "EXPORT"}</span>
             </Btn>
           </div>
