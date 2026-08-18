@@ -19,6 +19,7 @@ export default function FeedView() {
   const [prioOnly, setPrioOnly] = useState(false);
 
   const items = sim.news.filter((n) => (region === "ALL" || n.region === region) && (!prioOnly || n.priority !== "ROUTINE"));
+  const liveCount = sim.news.filter((n) => n.live).length;
   const tension = sim.tension;
   const crit = sim.conflicts.filter((c) => c.intensity > 80);
   const dark = sim.ships.filter((s) => s.name.includes("DARK"));
@@ -74,7 +75,7 @@ export default function FeedView() {
       {/* main feed */}
       <section className="flex-1 min-w-0 flex flex-col min-h-0">
         <Panel className="flex-1 flex flex-col min-h-0" pad={false}
-          title="INTELLIGENCE FEED · AI-AGGREGATED"
+          title={<span>INTELLIGENCE FEED · {liveCount > 0 ? <span className="text-gn">{liveCount} LIVE</span> : "AI-AGGREGATED"}</span>}
           right={
             <div className="flex items-center gap-1.5">
               <button onClick={() => setPrioOnly(!prioOnly)}
@@ -93,6 +94,7 @@ export default function FeedView() {
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-mono text-[9px] text-dim tabular">{agoLabel(n.t, sim.t)}</span>
                   <Tag tone="fog">{n.source}</Tag>
+                  {n.live && <Tag tone="gn"><span className="anim-pulse-soft">●</span>&nbsp;LIVE</Tag>}
                   <Tag tone={n.region === "CYBER" ? "vio" : n.region === "MARITIME" ? "tl" : "cy"}>{n.region}</Tag>
                   {n.priority === "FLASH" && <Tag tone="rd"><span className="anim-blink">◆</span>&nbsp;FLASH</Tag>}
                   {n.priority === "PRIORITY" && <Tag tone="am">PRIORITY</Tag>}

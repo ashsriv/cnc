@@ -1,11 +1,92 @@
 import { useState } from "react";
-import { Wallet, ShieldAlert, Send, ArrowDownLeft, ArrowUpRight, Search } from "lucide-react";
+import { Wallet, ShieldAlert, Send, ArrowDownLeft, ArrowUpRight, Search, RadioTower, Loader2 } from "lucide-react";
 import { seedWallets, seedSdn, seedTg } from "../data/seed";
 import { Panel, Tag, Bar, Spark, Kv, Stat, Btn } from "../components/ui";
 import { useStore } from "../state/store";
 import { fmtInt, mulberry, hashStr } from "../lib/geo";
+import { fetchAddress, type ChainResult } from "../lib/live";
 
 type Tab = "wallets" | "ofac" | "tg";
+
+const CHAIN_DEFAULTS: Record<"BTC" | "ETH", string> = {
+  BTC: "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa",            // genesis block coinbase — public knowledge
+  ETH: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",      // vitalik.eth — public knowledge
+};
+
+function LiveLookup() {
+  const { sources, setSource, log } = useStore();
+  const [chain, setChain] = useState<"BTC" | "ETH">("BTC");
+  const [addr, setAddr] = useState(CHAIN_DEFAULTS.BTC);
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState<ChainResult | null>(null);
+  const [err, setErr] = useState("");
+
+  const run = async () => {
+    const a = addr.trim();
+    if (!a || busy) return;
+    setBusy(true); setErr(""); setSource("BLOCKCHAIR", "CONNECTING");
+    try {
+      const r = await fetchAddress(chain, a);
+      setRes(r); setSource("BLOCKCHAIR", "LIVE");
+      log(`[CHAIN] ${chain} ledger query ${a.slice(0, 12)}… → ${r.txCount.toLocaleString()} txs on record`);
+    } catch (e) {
+      setErr((e as Error).message || "ledger uplink failed"); setSource("BLOCKCHAIR", "ERROR");
+    } finally { setBusy(false); }
+  };
+
+  const st = sources.BLOCKCHAIR;
+  return (
+    <Panel className="shrink-0" pad={false}
+      title={<span className="flex items-center gap-1.5"><RadioTower size={11} className="text-gn" /> LIVE ON-CHAIN LOOKUP · BLOCKCHAIR</span>}
+      right={<Tag tone={st === "LIVE" ? "gn" : st === "ERROR" ? "rd" : st === "CONNECTING" ? "am" : "fog"}>{st}</Tag>}>
+      <div className="flex flex-wrap items-center gap-1.5 p-2.5">
+        <select value={chain} onChange={(e) => {
+          const c = e.target.value as "BTC" | "ETH";
+          setChain(c);
+          if (!addr.trim() || (Object.values(CHAIN_DEFAULTS) as string[]).includes(addr.trim())) setAddr(CHAIN_DEFAULTS[c]);
+          setRes(null); setErr("");
+        }} className="bg-ink border border-line2 px-2 py-1.5 font-mono text-[10.5px] text-snow">
+          <option value="BTC">BTC</option>
+          <option value="ETH">ETH</option>
+        </select>
+        <input value={addr} onChange={(e) => setAddr(e.target.value)} onKeyDown={(e) => e.key === "Enter" && run()}
+          placeholder={chain === "BTC" ? "bc1… / 1… / 3… address" : "0x… address"} spellCheck={false}
+          className="flex-1 min-w-[260px] bg-ink border border-line2 px-2.5 py-1.5 font-mono text-[10.5px] text-snow placeholder:text-dim focus:border-gn/60 transition-colors" />
+        <button onClick={run} disabled={busy}
+          className={`px-3 py-1.5 border font-display text-[10px] font-bold tracking-[0.15em] flex items-center gap-1.5 transition-all ${busy ? "border-line2 text-dim" : "text-ink bg-gn border-gn hover:shadow-[0_0_16px_rgba(85,224,156,0.4)]"}`}>
+          {busy ? <Loader2 size={10} className="animate-spin" /> : null} {busy ? "QUERYING" : "EXECUTE"}
+        </button>
+      </div>
+
+      {err && <div className="px-3 pb-2 font-mono text-[10px] text-rd">✕ {err} — ledger API rate-limited or address not indexed. Dossiers below remain from the intel snapshot.</div>}
+
+      {res && (
+        <div className="border-t border-line px-3 py-2.5 anim-fadeup">
+          <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1">
+            <span className="font-mono text-[17px] text-gn tabular">{res.balance.toFixed(res.chain === "BTC" ? 8 : 4)} <span className="text-[10px] text-fog">{res.chain}</span></span>
+            <span className="font-mono text-[10px] text-fog tabular">TXS <span className="text-snow">{res.txCount.toLocaleString()}</span></span>
+            <span className="font-mono text-[10px] text-fog tabular">RECEIVED <span className="text-snow">{res.received.toFixed(res.chain === "BTC" ? 4 : 2)}</span></span>
+            <span className="font-mono text-[10px] text-fog tabular">SENT <span className="text-snow">{res.sent.toFixed(res.chain === "BTC" ? 4 : 2)}</span></span>
+            {res.firstSeen && <span className="font-mono text-[10px] text-fog tabular">FIRST SEEN <span className="text-snow">{res.firstSeen.slice(0, 10)}</span></span>}
+            <Tag tone="gn">REAL LEDGER DATA</Tag>
+          </div>
+          {res.txs.length > 0 && (
+            <div className="mt-2 grid gap-1">
+              {res.txs.slice(0, 3).map((tx) => (
+                <div key={tx.hash} className="flex items-center gap-2 font-mono text-[9.5px] tabular">
+                  <span className={tx.dir === "IN" ? "text-gn" : "text-rd"}>{tx.dir === "IN" ? "▲" : "▼"}</span>
+                  <span className="text-cy">{tx.hash.slice(0, 18)}…</span>
+                  <span className="text-dim">{tx.time.slice(0, 10)}</span>
+                  <span className="ml-auto text-fog">{tx.value.toFixed(res.chain === "BTC" ? 6 : 4)} {res.chain}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </Panel>
+  );
+}
 
 export default function EntitiesView() {
   const { log, raiseAlert, addRule } = useStore();
@@ -52,6 +133,8 @@ export default function EntitiesView() {
         ))}
         <span className="flex-1 border-b border-line" />
       </div>
+
+      {tab === "wallets" && <LiveLookup />}
 
       {/* ---------- WALLETS ---------- */}
       {tab === "wallets" && (

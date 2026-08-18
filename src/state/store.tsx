@@ -1,7 +1,8 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import type { SimState, View, LayerKey, Sel, UavMode, Waypoint, Rally, WatchRule, Alert } from "../lib/types";
+import type { SimState, View, LayerKey, Sel, UavMode, Waypoint, Rally, WatchRule, Alert, SourceKey, SourceState } from "../lib/types";
 import { initSim, stepSim } from "../lib/sim";
 import { hexId } from "../lib/geo";
+import { initState, fetchQuakes, fetchFires, fetchNews, fetchFlights, fetchSatRecs, propagateSats, type SatRec } from "../lib/live";
 
 interface Store {
   sim: SimState;
@@ -21,6 +22,8 @@ interface Store {
   log: (line: string) => void;
   raiseAlert: (sev: Alert["sev"], msg: string) => void;
   focus: { lat: number; lon: number; k: number } | null; setFocus: (f: { lat: number; lon: number; k: number } | null) => void;
+  sources: Record<SourceKey, SourceState>;
+  setSource: (k: SourceKey, v: SourceState) => void;
 }
 
 const Ctx = createContext<Store | null>(null);
@@ -38,15 +41,105 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [threat, setThreat] = useState(1);
   const [uavSel, setUavSel] = useState("UA01");
   const [focus, setFocus] = useState<{ lat: number; lon: number; k: number } | null>(null);
+  const [sources, setSources] = useState<Record<SourceKey, SourceState>>(initState);
   const simRef = useRef(sim);
   simRef.current = sim;
+  const srcRef = useRef(sources);
+  srcRef.current = sources;
+  const recsRef = useRef<SatRec[] | null>(null);
 
+  const mutateSim = (fn: (s: SimState) => SimState) => setSim((s) => fn(s));
+  const logLine = (line: string) => mutateSim((s) => ({ ...s, logs: [...s.logs, line].slice(-70) }));
+
+  const setSource = (k: SourceKey, v: SourceState) => {
+    if (srcRef.current[k] === v) return;
+    setSources((prev) => ({ ...prev, [k]: v }));
+    if (v === "LIVE") logLine(`[LINK] ${k} uplink established · real-time ingest active`);
+    else if (v === "SIM") logLine(`[LINK] ${k} unreachable · synthetic fallback engaged`);
+  };
+
+  /* ---------------- core 1 Hz simulation + live SGP4 propagation ---------------- */
   useEffect(() => {
-    const id = window.setInterval(() => setSim((s) => stepSim(s)), 1000);
+    const id = window.setInterval(() => {
+      setSim((s) => stepSim(s));
+      if (recsRef.current?.length) {
+        const live = propagateSats(recsRef.current, new Date());
+        if (live.length) setSim((s) => ({ ...s, sats: live }));
+      }
+    }, 1000);
     return () => window.clearInterval(id);
   }, []);
 
-  const mutateSim = (fn: (s: SimState) => SimState) => setSim((s) => fn(s));
+  /* ---------------- live pipelines ---------------- */
+  useEffect(() => {
+    let stop = false;
+
+    // USGS seismic — every 2 min
+    const usgs = async () => {
+      try {
+        const list = await fetchQuakes();
+        if (stop) return;
+        setSim((s) => ({
+          ...s,
+          quakes: [
+            ...list.map((q) => ({ ...q, age: s.t - Math.floor((q as any).elapsedMs / 2000) })),
+            ...s.quakes.filter((q) => !q.live),
+          ].slice(0, 15),
+        }));
+        setSource("USGS", "LIVE");
+      } catch { if (!stop) setSource("USGS", "SIM"); }
+    };
+
+    // NASA EONET wildfires — every 3 min
+    const eonet = async () => {
+      try {
+        const list = await fetchFires();
+        if (stop) return;
+        setSim((s) => ({ ...s, fires: [...list, ...s.fires.filter((f) => !f.live)].slice(0, 14) }));
+        setSource("EONET", "LIVE");
+      } catch { if (!stop) setSource("EONET", "SIM"); }
+    };
+
+    // GDELT news wire — every 100 s
+    const gdelt = async () => {
+      try {
+        const list = await fetchNews(simRef.current.t);
+        if (stop) return;
+        setSim((s) => ({ ...s, news: [...list, ...s.news.filter((n) => !n.live)].slice(0, 60) }));
+        setSource("GDELT", "LIVE");
+      } catch { if (!stop) setSource("GDELT", "SIM"); }
+    };
+
+    // OpenSky ADS-B — every 45 s (anonymous tier limit 1 req / 15 s)
+    const opensky = async () => {
+      try {
+        const list = await fetchFlights();
+        if (stop) return;
+        setSim((s) => ({ ...s, flights: list.length ? list : s.flights }));
+        setSource("OPENSKY", "LIVE");
+      } catch { if (!stop) setSource("OPENSKY", "SIM"); }
+    };
+
+    // CelesTrak TLEs — once
+    const tle = async () => {
+      try {
+        const recs = await fetchSatRecs();
+        if (stop) return;
+        recsRef.current = recs;
+        setSource("CELESTRAK", "LIVE");
+      } catch { if (!stop) setSource("CELESTRAK", "SIM"); }
+    };
+
+    usgs(); eonet(); gdelt(); tle();
+    setTimeout(opensky, 1500);
+    const ids = [
+      window.setInterval(usgs, 120000),
+      window.setInterval(eonet, 180000),
+      window.setInterval(gdelt, 100000),
+      window.setInterval(opensky, 45000),
+    ];
+    return () => { stop = true; ids.forEach(clearInterval); };
+  }, []);
 
   const store: Store = {
     sim, view, setView,
@@ -58,6 +151,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setGeofenceR: (n) => mutateSim((s) => ({ ...s, geofenceR: n })),
     uavSel, setUavSel,
     focus, setFocus,
+    sources, setSource,
     uavCmd: (id, cmd) =>
       mutateSim((s) => ({
         ...s,
@@ -83,7 +177,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ...s,
         uavs: s.uavs.map((u) => {
           if (u.id !== uavId) return u;
-          const last = u.wps[u.wps.length - 1] ?? { lat: u.home[0], lon: u.home[1], alt: 10000, spd: 120 };
+          const last = u.wps[u.wps.length - 1] ?? { lat: u.home[0], lon: u.home[1], alt: 10000, spd: 120, action: "SURVEY" };
           return { ...u, wps: [...u.wps, { lat: +(last.lat + 0.35).toFixed(2), lon: +(last.lon + 0.4).toFixed(2), alt: last.alt, spd: last.spd, action: "SURVEY" }] };
         }),
       })),
@@ -110,7 +204,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       })),
     toggleRule: (id) =>
       mutateSim((s) => ({ ...s, rules: s.rules.map((r) => (r.id === id ? { ...r, active: !r.active } : r)) })),
-    log: (line) => mutateSim((s) => ({ ...s, logs: [...s.logs, line].slice(-70) })),
+    log: logLine,
     raiseAlert: (sev, msg) =>
       mutateSim((s) => ({
         ...s,

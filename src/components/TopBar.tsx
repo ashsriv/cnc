@@ -1,6 +1,16 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../state/store";
 import { Dot } from "./ui";
+import { SOURCE_META } from "../lib/live";
+import type { SourceState } from "../lib/types";
+
+const ST_STYLE: Record<SourceState, { c: string; dot: string; note: string }> = {
+  LIVE: { c: "text-gn border-gn/40", dot: "bg-gn", note: "real-time ingest" },
+  CONNECTING: { c: "text-am border-am/30", dot: "bg-am anim-blink", note: "negotiating…" },
+  SIM: { c: "text-fog border-line2", dot: "bg-fog/70", note: "unreachable · synthetic fallback" },
+  ERROR: { c: "text-rd border-rd/40", dot: "bg-rd", note: "query failed" },
+  STANDBY: { c: "text-dim border-line", dot: "bg-dim", note: "on-demand" },
+};
 
 const THREATS = [
   { n: "GREEN", c: "text-gn", bg: "bg-gn" },

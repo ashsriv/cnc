@@ -13,7 +13,8 @@ import WatchlistView from "./views/WatchlistView";
 const BOOT_LINES = [
   "AEGIS C2 KERNEL 4.2.1 — secure boot verified",
   "mounting sensor mesh … 14/14 relays online",
-  "ADS-B / AIS / SAT ingest pipelines armed",
+  "live uplinks: USGS · EONET · GDELT · OPENSKY · CELESTRAK",
+  "synthetic fallback armed for unreachable feeds",
   "loading basemap · Natural Earth 110m … OK",
   "correlation engine seeded · 2,412 entities",
   "operator OP-7 NIGHTOWL authenticated · TS//SIM",
