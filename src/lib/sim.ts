@@ -1,4 +1,4 @@
-import type { SimState, Flight, NewsItem, Uav, Alert } from "./types";
+import type { SimState, Flight, NewsItem, Uav, Alert, StatsSeries } from "./types";
 import {
   seedFlights, mkFlight, seedShips, seedSats, seedCams, seedQuakes, seedConflicts,
   seedFires, seedUavs, seedRules, seedAlerts, NEWS_POOL, SEISMIC_ZONES, LOG_POOL, CITIES,
@@ -24,6 +24,22 @@ export function initSim(): SimState {
     rules: seedRules.map((r) => ({ ...r })),
     alerts: seedAlerts.map((a) => ({ ...a })),
     tension: Array.from({ length: 48 }, (_, i) => 58 + Math.sin(i / 5) * 6 + rnd(-2, 2)),
+    stats: initStats(),
+  };
+}
+
+function initStats(): StatsSeries {
+  const N = 48;
+  const mk = (base: number, amp: number, noise: number, floor = 0) =>
+    Array.from({ length: N }, (_, i) => Math.max(floor, +(base + Math.sin(i / 6) * amp + rnd(-noise, noise)).toFixed(1)));
+  return {
+    t: Array.from({ length: N }, (_, i) => i - N),
+    flights: mk(27, 4, 2), ships: mk(10, 1.5, 1), sats: mk(18, 2, 1),
+    quakes: mk(4, 1.4, 1), fires: mk(6, 1, 1),
+    ingest: mk(430, 40, 25, 200), fusion: mk(74, 5, 3, 40), correlated: mk(2.4, 1.2, 1),
+    liveRatio: mk(38, 8, 5), darkShips: mk(1.2, 0.6, 0.5),
+    sentPos: mk(12, 3, 2), sentNeg: mk(9, 3, 2), sentNeu: mk(16, 3, 2),
+    newsRate: mk(34, 8, 5, 4),
   };
 }
 
@@ -219,9 +235,33 @@ export function stepSim(s: SimState): SimState {
   const conflictAvg = conflicts.reduce((a, c) => a + c.intensity, 0) / conflicts.length;
   const tension = [...s.tension, clamp(conflictAvg * 0.72 + quakes.length * 1.4 + rnd(-1.5, 1.5), 20, 98)].slice(-90);
 
+  // ---- sensor-fusion stats accumulation ----
+  const liveRecs = flights.filter((f) => f.live).length + ships.filter((x) => x.live).length +
+    sats.filter((x) => x.live).length + quakes.filter((x) => x.live).length + fires.filter((x) => x.live).length;
+  const totalRecs = Math.max(1, flights.length + ships.length + sats.length + quakes.length + fires.length);
+  const sent30 = news.slice(0, 30);
+  const push = <T,>(arr: T[], v: T) => [...arr, v].slice(-90);
+  const stats: StatsSeries = {
+    t: push(s.stats.t, t),
+    flights: push(s.stats.flights, flights.length),
+    ships: push(s.stats.ships, ships.length),
+    sats: push(s.stats.sats, sats.length),
+    quakes: push(s.stats.quakes, quakes.length),
+    fires: push(s.stats.fires, fires.length),
+    ingest: push(s.stats.ingest, +(410 + liveRecs * 2.6 + rnd(-45, 65)).toFixed(0)),
+    fusion: push(s.stats.fusion, +clamp(56 + totalRecs * 0.22 + tension[tension.length - 1] * 0.1 + rnd(-2.2, 2.2), 40, 97).toFixed(1)),
+    correlated: push(s.stats.correlated, Math.random() < 0.18 + tension[tension.length - 1] / 500 ? 1 + Math.round(rnd(0, 2)) : 0),
+    liveRatio: push(s.stats.liveRatio, +((liveRecs / totalRecs) * 100).toFixed(1)),
+    darkShips: push(s.stats.darkShips, ships.filter((x) => x.name.includes("DARK")).length),
+    sentPos: push(s.stats.sentPos, sent30.filter((n) => n.sentiment > 0).length),
+    sentNeg: push(s.stats.sentNeg, sent30.filter((n) => n.sentiment < 0).length),
+    sentNeu: push(s.stats.sentNeu, sent30.filter((n) => n.sentiment === 0).length),
+    newsRate: push(s.stats.newsRate, news.filter((n) => n.t >= t - 30).length),
+  };
+
   return {
     ...s, t, flights, ships, sats, cams, quakes, conflicts, fires, news, newsIdx,
-    logs: logsTrim.slice(-70), uavs, alerts, tension, geofenceR,
+    logs: logsTrim.slice(-70), uavs, alerts, tension, geofenceR, stats,
   };
 }
 

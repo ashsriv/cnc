@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import type { SimState, View, LayerKey, Sel, UavMode, Waypoint, Rally, WatchRule, Alert, SourceKey, SourceState } from "../lib/types";
+import type { SimState, View, LayerKey, Sel, UavMode, Waypoint, Rally, WatchRule, Alert, SourceKey, SourceState, Ship } from "../lib/types";
 import { initSim, stepSim } from "../lib/sim";
 import { hexId } from "../lib/geo";
 import { initState, fetchQuakes, fetchFires, fetchNews, fetchFlights, fetchSatRecs, propagateSats, type SatRec } from "../lib/live";
@@ -24,6 +24,9 @@ interface Store {
   focus: { lat: number; lon: number; k: number } | null; setFocus: (f: { lat: number; lon: number; k: number } | null) => void;
   sources: Record<SourceKey, SourceState>;
   setSource: (k: SourceKey, v: SourceState) => void;
+  aisKey: string; saveAisKey: (k: string) => void;
+  aisRegions: string[]; toggleAisRegion: (r: string) => void;
+  settingsOpen: boolean; setSettingsOpen: (v: boolean) => void;
 }
 
 const Ctx = createContext<Store | null>(null);
@@ -31,6 +34,13 @@ const Ctx = createContext<Store | null>(null);
 const DEFAULT_LAYERS: Record<LayerKey, boolean> = {
   flights: true, ships: true, sats: true, cams: true,
   quakes: true, conflicts: true, fires: true,
+};
+
+export const AIS_REGIONS: Record<string, { label: string; box: string }> = {
+  MED: { label: "MEDITERRANEAN", box: "[[30,-6],[46,36]]" },
+  ARABIAN_SEA: { label: "ARABIAN SEA", box: "[[5,55],[25,75]]" },
+  BAY_OF_BENGAL: { label: "BAY OF BENGAL", box: "[[5,78],[22,97]]" },
+  SCS: { label: "SOUTH CHINA SEA", box: "[[2,100],[22,120]]" },
 };
 
 export function StoreProvider({ children }: { children: ReactNode }) {
@@ -141,6 +151,86 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => { stop = true; ids.forEach(clearInterval); };
   }, []);
 
+  /* ---------------- AISStream WebSocket (operator-supplied key) ---------------- */
+  const [aisKey, setAisKey] = useState(() => localStorage.getItem("aegis_ais_key") ?? "");
+  const [aisRegions, setAisRegions] = useState<string[]>(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem("aegis_ais_regions") ?? "null");
+      return Array.isArray(v) && v.length ? v : ["MED", "ARABIAN_SEA"];
+    } catch { return ["MED", "ARABIAN_SEA"]; }
+  });
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const liveShips = useRef(new Map<string, Ship>());
+  const dirtyRef = useRef(false);
+  const wsRef = useRef<WebSocket | null>(null);
+
+  const saveAisKey = (k: string) => {
+    const v = k.trim();
+    setAisKey(v);
+    if (v) localStorage.setItem("aegis_ais_key", v);
+    else { localStorage.removeItem("aegis_ais_key"); liveShips.current.clear(); dirtyRef.current = true; }
+    logLine(v ? "[AIS] operator key stored (browser-local) — reconnecting uplink" : "[AIS] key cleared — reverting to synthetic AIS");
+  };
+  const toggleAisRegion = (r: string) => setAisRegions((rs) => {
+    const n = rs.includes(r) ? rs.filter((x) => x !== r) : [...rs, r];
+    localStorage.setItem("aegis_ais_regions", JSON.stringify(n));
+    return n;
+  });
+
+  useEffect(() => {
+    if (!aisKey || aisRegions.length === 0) { setSource("AISSTREAM", "STANDBY"); return; }
+    let closed = false; let retries = 0;
+    const boxes = aisRegions.map((r) => AIS_REGIONS[r].box).join(",");
+    const url = `wss://stream.aisstream.io/v0/ws?apikey=${encodeURIComponent(aisKey)}&bbox=${encodeURIComponent(`[${boxes}]`)}&filterMessageTypes=${encodeURIComponent('["PositionReport","ClassBCSPositionReport"]')}`;
+    const connect = () => {
+      if (closed) return;
+      setSource("AISSTREAM", "CONNECTING");
+      let ws: WebSocket;
+      try { ws = new WebSocket(url); } catch { setSource("AISSTREAM", "ERROR"); return; }
+      wsRef.current = ws;
+      ws.onopen = () => { if (!closed) { retries = 0; setSource("AISSTREAM", "LIVE"); logLine("[AIS] AISSTREAM uplink established — position reports streaming"); } };
+      ws.onmessage = (ev) => {
+        try {
+          const m = JSON.parse(ev.data);
+          const pr = m?.Message?.PositionReport ?? m?.Message?.ClassBCSPositionReport;
+          const md = m?.MetaData;
+          if (!pr || !md || md.Latitude == null || md.Longitude == null) return;
+          const name = String(md.ShipName ?? "").replace(/[^\x20-\x7E]/g, "").trim() || `MMSI ${md.MMSI}`;
+          const sog = typeof pr.Sog === "number" ? pr.Sog / 10 : 0;
+          const cog = typeof pr.Cog === "number" && pr.Cog <= 3600 ? pr.Cog / 10 : 0;
+          const hdg = typeof pr.TrueHeading === "number" && pr.TrueHeading <= 359 ? pr.TrueHeading : cog;
+          const id = `ais-${md.MMSI}`;
+          liveShips.current.delete(id);
+          liveShips.current.set(id, { id, name, cls: "AIS LIVE", lat: +md.Latitude, lon: +md.Longitude, spd: sog, hdg, flag: "—", live: true, mmsi: +md.MMSI });
+          if (liveShips.current.size > 240) {
+            const first = liveShips.current.keys().next().value;
+            if (first) liveShips.current.delete(first);
+          }
+          dirtyRef.current = true;
+        } catch { /* ignore malformed frames */ }
+      };
+      ws.onclose = () => {
+        if (closed) return;
+        retries++;
+        if (retries <= 2) setTimeout(connect, 4000);
+        else { setSource("AISSTREAM", "ERROR"); logLine("[AIS] AISSTREAM link lost — synthetic fallback engaged"); }
+      };
+      ws.onerror = () => ws.close();
+    };
+    connect();
+    return () => { closed = true; wsRef.current?.close(); };
+  }, [aisKey, aisRegions]);
+
+  // flush live AIS positions into the sim on a slow cadence
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (!dirtyRef.current) return;
+      dirtyRef.current = false;
+      setSim((s) => ({ ...s, ships: [...s.ships.filter((x) => !x.live), ...Array.from(liveShips.current.values())] }));
+    }, 1500);
+    return () => window.clearInterval(id);
+  }, []);
+
   const store: Store = {
     sim, view, setView,
     layers,
@@ -152,6 +242,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     uavSel, setUavSel,
     focus, setFocus,
     sources, setSource,
+    aisKey, saveAisKey, aisRegions, toggleAisRegion, settingsOpen, setSettingsOpen,
     uavCmd: (id, cmd) =>
       mutateSim((s) => ({
         ...s,

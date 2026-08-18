@@ -36,13 +36,14 @@ export const SOURCE_META: { k: SourceKey; label: string; feed: string }[] = [
   { k: "GDELT", label: "GDELT", feed: "DOC 2.0 global news wire" },
   { k: "OPENSKY", label: "OPENSKY", feed: "ADS-B live air traffic" },
   { k: "CELESTRAK", label: "TLE/SGP4", feed: "CelesTrak orbits · propagated" },
+  { k: "AISSTREAM", label: "AIS WS", feed: "AISStream WebSocket · operator key" },
   { k: "BLOCKCHAIR", label: "CHAIN", feed: "On-chain ledger queries" },
 ];
 
-export const ALL_SOURCES: SourceKey[] = ["USGS", "EONET", "GDELT", "OPENSKY", "CELESTRAK", "BLOCKCHAIR"];
+export const ALL_SOURCES: SourceKey[] = ["USGS", "EONET", "GDELT", "OPENSKY", "CELESTRAK", "AISSTREAM", "BLOCKCHAIR"];
 
 export function initState(): Record<SourceKey, SourceState> {
-  return { USGS: "CONNECTING", EONET: "CONNECTING", GDELT: "CONNECTING", OPENSKY: "CONNECTING", CELESTRAK: "CONNECTING", BLOCKCHAIR: "STANDBY" };
+  return { USGS: "CONNECTING", EONET: "CONNECTING", GDELT: "CONNECTING", OPENSKY: "CONNECTING", CELESTRAK: "CONNECTING", AISSTREAM: "STANDBY", BLOCKCHAIR: "STANDBY" };
 }
 
 /* ------------------------------------------------------------------ */
@@ -144,11 +145,7 @@ export async function fetchNews(simTick: number): Promise<NewsItem[]> {
 /* OpenSky — live ADS-B                                                */
 /* ------------------------------------------------------------------ */
 
-export async function fetchFlights(): Promise<Flight[]> {
-  // European + Eastern Med box to keep payload small on anonymous tier
-  const j = await getJSON("https://opensky-network.org/api/states/all?lamin=34&lamax=58&lomin=-11&lomax=35");
-  const states: any[][] = j.states ?? [];
-  const out: Flight[] = [];
+function mapOpenSkyStates(states: any[][], out: Flight[], cap: number) {
   for (const st of states) {
     const [icao, cs, origin, , , lon, lat, baro, onGround, vel, track] = st;
     if (onGround || lon == null || lat == null) continue;
@@ -165,11 +162,26 @@ export async function fetchFlights(): Promise<Flight[]> {
       hdg: track ?? 0,
       t: 0,
       a: [lon, lat], b: [lon, lat],
-      mil: /^(RCH|NAVY|USN|USAF|USMC|CG|AF[0-9]|NATO)/i.test(callsign),
+      mil: /^(RCH|NAVY|USN|USAF|USMC|CG|AF[0-9]|NATO|IAF)/i.test(callsign),
       live: true,
     });
-    if (out.length >= 56) break;
+    if (out.length >= cap) break;
   }
+}
+
+export async function fetchFlights(): Promise<Flight[]> {
+  // Two boxes: European/Med corridor + Indian subcontinent corridor
+  const boxes = [
+    "https://opensky-network.org/api/states/all?lamin=34&lamax=58&lomin=-11&lomax=35",
+    "https://opensky-network.org/api/states/all?lamin=5&lamax=37&lomin=60&lomax=95",
+  ];
+  const results = await Promise.allSettled(boxes.map((u) => getJSON(u)));
+  const out: Flight[] = [];
+  results.forEach((r, i) => {
+    if (r.status === "fulfilled") mapOpenSkyStates(r.value.states ?? [], out, i === 0 ? 48 : 40);
+    else throw new Error("opensky box failed");
+  });
+  if (out.length === 0) throw new Error("opensky unreachable");
   return out;
 }
 

@@ -1,9 +1,10 @@
-import { Globe2, Newspaper, Terminal, Fingerprint, Navigation, BellRing } from "lucide-react";
+import { Globe2, Newspaper, Terminal, Fingerprint, Navigation, BellRing, BarChart3 } from "lucide-react";
 import type { View } from "../lib/types";
 import { useStore } from "../state/store";
 
 const NAV: { v: View; label: string; icon: any; hint: string }[] = [
   { v: "ops", label: "GLOBAL OPS", icon: Globe2, hint: "sensor fusion map" },
+  { v: "analytics", label: "ANALYTICS", icon: BarChart3, hint: "sensor fusion metrics" },
   { v: "feed", label: "INTEL FEED", icon: Newspaper, hint: "AI aggregation" },
   { v: "recon", label: "RECON", icon: Terminal, hint: "DNS · WHOIS · IP · SSL" },
   { v: "entities", label: "ENTITIES", icon: Fingerprint, hint: "wallets · SDN · TG" },

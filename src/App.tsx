@@ -9,6 +9,7 @@ import ReconView from "./views/ReconView";
 import EntitiesView from "./views/EntitiesView";
 import MissionView from "./views/MissionView";
 import WatchlistView from "./views/WatchlistView";
+import AnalyticsView from "./views/AnalyticsView";
 
 const BOOT_LINES = [
   "AEGIS C2 KERNEL 4.2.1 — secure boot verified",
@@ -77,6 +78,7 @@ function Shell() {
           {view === "entities" && <EntitiesView />}
           {view === "missions" && <MissionView />}
           {view === "watch" && <WatchlistView />}
+          {view === "analytics" && <AnalyticsView />}
         </main>
       </div>
       <BottomBar />
