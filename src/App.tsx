@@ -15,7 +15,7 @@ const BOOT_LINES = [
   "AEGIS C2 KERNEL 4.2.1 — secure boot verified",
   "mounting sensor mesh … 14/14 relays online",
   "live uplinks: ADL re-api · USGS · EONET · GDELT · OPENSKY · CELESTRAK",
-  "ADL India corridor armed · −0.10° → 99.56°E · 15 s cadence",
+  "ADL India corridor armed · 0.10°S→66.5°N · 41.9°E→99.6°E · 15 s",
   "persistence vault mounted · rules + alert history durable",
   "synthetic fallback armed for unreachable feeds",
   "loading basemap · Natural Earth 110m … OK",

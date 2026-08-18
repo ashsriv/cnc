@@ -11,6 +11,7 @@ export interface Flight {
   lat: number; lon: number; alt: number; spd: number; hdg: number; t: number;
   a: [number, number]; b: [number, number]; mil: boolean;
   live?: boolean;
+  seen?: number;
 }
 export interface Ship {
   id: string; name: string; cls: string; lat: number; lon: number;
