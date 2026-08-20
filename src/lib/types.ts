@@ -1,8 +1,9 @@
-export type View = "ops" | "feed" | "recon" | "entities" | "missions" | "watch" | "analytics";
+export type View = "ops" | "feed" | "recon" | "entities" | "missions" | "watch" | "analytics" | "space" | "markets" | "graph" | "alerts";
+export type MapMode = "vector" | "satellite" | "globe";
 export type AnalyticsSection = "all" | "adsb" | "maritime" | "satellite" | "seismic" | "news" | "fusion";
 export type LayerKey = "flights" | "ships" | "sats" | "cams" | "quakes" | "conflicts" | "fires";
 
-export type SourceKey = "USGS" | "EONET" | "GDELT" | "OPENSKY" | "ADL" | "CELESTRAK" | "AISSTREAM" | "BLOCKCHAIR";
+export type SourceKey = "USGS" | "EONET" | "GDELT" | "OPENSKY" | "ADL" | "CELESTRAK" | "AISSTREAM" | "BLOCKCHAIR" | "SWPC" | "COINGECKO";
 export interface FeedTelemetry { msgs: number; lat: number; ok: boolean; }
 export type SourceState = "CONNECTING" | "LIVE" | "SIM" | "ERROR" | "STANDBY";
 
@@ -65,6 +66,18 @@ export interface WatchRule {
 export interface Alert { id: string; t: number; sev: "INFO" | "WARN" | "CRIT"; msg: string; }
 
 export interface Sel { kind: LayerKey | "uav"; id: string }
+
+export interface SpaceData {
+  xray: { t: string; flux: number }[];
+  kp: { t: string; kp: number }[];
+  wind: { t: string; speed: number; density: number; temp: number }[];
+  kpNow: number; fluxNow: number; speedNow: number;
+  flare: string; storm: string;
+}
+export interface MarketCoin {
+  id: string; symbol: string; name: string; price: number; change24h: number;
+  spark: number[]; ohlc: [number, number, number, number, number][];
+}
 
 export interface StatsSeries {
   t: number[];

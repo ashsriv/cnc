@@ -1,14 +1,18 @@
-import { Globe2, Newspaper, Terminal, Fingerprint, Navigation, BellRing, BarChart3 } from "lucide-react";
+import { Globe2, Newspaper, Terminal, Fingerprint, Navigation, BellRing, BarChart3, Orbit, CandlestickChart, Network, Siren } from "lucide-react";
 import type { View } from "../lib/types";
 import { useStore } from "../state/store";
 
 const NAV: { v: View; label: string; icon: any; hint: string }[] = [
   { v: "ops", label: "GLOBAL OPS", icon: Globe2, hint: "sensor fusion map" },
   { v: "analytics", label: "ANALYTICS", icon: BarChart3, hint: "sensor fusion metrics" },
+  { v: "space", label: "SPACE", icon: Orbit, hint: "solar weather · NOAA SWPC" },
+  { v: "markets", label: "MARKETS", icon: CandlestickChart, hint: "crypto · CoinGecko" },
   { v: "feed", label: "INTEL FEED", icon: Newspaper, hint: "AI aggregation" },
   { v: "recon", label: "RECON", icon: Terminal, hint: "DNS · WHOIS · IP · SSL" },
   { v: "entities", label: "ENTITIES", icon: Fingerprint, hint: "wallets · SDN · TG" },
+  { v: "graph", label: "GRAPH", icon: Network, hint: "entity correlation" },
   { v: "missions", label: "MISSIONS", icon: Navigation, hint: "UAS control" },
+  { v: "alerts", label: "ALERTS", icon: Siren, hint: "live alert stream" },
   { v: "watch", label: "WATCHLIST", icon: BellRing, hint: "rules & alerts" },
 ];
 
@@ -29,14 +33,17 @@ function Radar() {
 }
 
 export default function Sidebar() {
-  const { view, setView, sim } = useStore();
+  const { view, setView, sim, marketsData, spaceData } = useStore();
   const crit = sim.alerts.filter((a) => a.sev === "CRIT" && sim.t - a.t < 240).length;
   const airborne = sim.uavs.filter((u) => u.mode !== "STANDBY").length;
 
   const badges: Partial<Record<View, { n: number; tone: string }>> = {
     watch: crit > 0 ? { n: crit, tone: "bg-rd text-ink" } : { n: sim.alerts.length, tone: "bg-line2 text-snow" },
+    alerts: crit > 0 ? { n: crit, tone: "bg-rd text-ink" } : { n: sim.alerts.length, tone: "bg-line2 text-snow" },
     missions: { n: airborne, tone: "bg-gn/90 text-ink" },
     feed: { n: sim.news.filter((x) => x.priority === "FLASH").length, tone: "bg-am text-ink" },
+    markets: { n: marketsData.filter((c) => c.change24h >= 0).length, tone: "bg-tl text-ink" },
+    space: spaceData && spaceData.kpNow >= 5 ? { n: 1, tone: "bg-am text-ink" } : undefined,
   };
 
   return (

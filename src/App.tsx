@@ -10,6 +10,10 @@ import EntitiesView from "./views/EntitiesView";
 import MissionView from "./views/MissionView";
 import WatchlistView from "./views/WatchlistView";
 import AnalyticsView from "./views/AnalyticsView";
+import SpaceView from "./views/SpaceView";
+import MarketsView from "./views/MarketsView";
+import GraphView from "./views/GraphView";
+import AlertsView from "./views/AlertsView";
 
 const BOOT_LINES = [
   "AEGIS C2 KERNEL 4.2.1 — secure boot verified",
@@ -81,6 +85,10 @@ function Shell() {
           {view === "missions" && <MissionView />}
           {view === "watch" && <WatchlistView />}
           {view === "analytics" && <AnalyticsView />}
+          {view === "space" && <SpaceView />}
+          {view === "markets" && <MarketsView />}
+          {view === "graph" && <GraphView />}
+          {view === "alerts" && <AlertsView />}
         </main>
       </div>
       <BottomBar />
