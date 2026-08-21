@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { geoNaturalEarth1, geoPath, geoGraticule10, geoCircle } from "d3-geo";
+import { geoNaturalEarth1, geoMercator, geoOrthographic, geoPath, geoGraticule10, geoCircle } from "d3-geo";
 import { feature } from "topojson-client";
 // @ts-ignore — bundled offline basemap
 import worldTopo from "world-atlas/countries-110m.json";
@@ -20,21 +20,65 @@ const circleGen = geoCircle().precision(2);
 export interface MissionOverlay { uav: Uav; geofenceR: number; }
 
 export default function WorldMap({ mission, heightClass = "h-full" }: { mission?: MissionOverlay; heightClass?: string }) {
-  const { sim, layers, sel, select, focus, setFocus } = useStore();
+  const { sim, layers, sel, select, focus, setFocus, mapMode, setMapMode } = useStore();
   const svgRef = useRef<SVGSVGElement>(null);
   const [tf, setTf] = useState({ k: 1, x: 0, y: 0 });
   const [drag, setDrag] = useState<{ px: number; py: number; x: number; y: number } | null>(null);
   const [cursor, setCursor] = useState<{ lat: number; lon: number } | null>(null);
   const [hover, setHover] = useState<{ px: number; py: number; label: string; sub: string } | null>(null);
+  const [rotation, setRotation] = useState<[number, number, number]>([0, -18, 0]);
+  const rotDrag = useRef<{ lon: number; lat: number; r: [number, number, number] } | null>(null);
+
+  // mode-driven projection (vector / satellite / 3d globe)
+  const proj = useMemo(() => {
+    if (mapMode === "satellite") return geoMercator().scale(190).translate([W / 2, H / 2]);
+    if (mapMode === "globe") return geoOrthographic().scale(265).translate([W / 2, H / 2]).rotate(rotation);
+    return geoNaturalEarth1().scale(219).translate([W / 2, H / 2 + 14]);
+  }, [mapMode, rotation]);
+  const pather = useMemo(() => geoPath(proj), [proj]);
+  const land = useMemo(() => pather(feature(topo, topo.objects.land) as any) ?? "", [pather]);
+  const borders = useMemo(() => pather(feature(topo, topo.objects.countries) as any) ?? "", [pather]);
+  const grat = useMemo(() => pather(geoGraticule10()) ?? "", [pather]);
+
+  // reset pan/zoom when the projection changes
+  useEffect(() => { setTf({ k: 1, x: 0, y: 0 }); }, [mapMode]);
+
+  // cull far-side markers on the globe
+  const visible = (lon: number, lat: number) => {
+    if (mapMode !== "globe") return true;
+    const [rl, rp] = proj.rotate();
+    const l0 = (-rl * Math.PI) / 180, p0 = (-rp * Math.PI) / 180;
+    const l = (lon * Math.PI) / 180, p = (lat * Math.PI) / 180;
+    return Math.sin(p0) * Math.sin(p) + Math.cos(p0) * Math.cos(p) * Math.cos(l - l0) > 0.03;
+  };
+
+  // satellite tile grid (screen-space, aligned to the Mercator projection)
+  const satTiles = useMemo(() => {
+    if (mapMode !== "satellite") return [];
+    const z = clamp(Math.round(2 + Math.log2(tf.k) * 1.5), 1, 6);
+    const n = 2 ** z;
+    const inv = (sx: number, sy: number) => proj.invert?.([(sx - tf.x) / tf.k, (sy - tf.y) / tf.k]);
+    const c1 = inv(0, 0), c2 = inv(W, H);
+    if (!c1 || !c2) return [];
+    const lonMin = Math.min(c1[0], c2[0]), lonMax = Math.max(c1[0], c2[0]);
+    const latMin = Math.max(-85, Math.min(c1[1], c2[1])), latMax = Math.min(85, Math.max(c1[1], c2[1]));
+    const x2t = (lon: number) => ((lon + 180) / 360) * n;
+    const y2t = (lat: number) => { const s = Math.sin((lat * Math.PI) / 180); return (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * n; };
+    const tx0 = Math.floor(x2t(lonMin)), tx1 = Math.min(Math.floor(x2t(lonMax)), tx0 + 30);
+    const ty0 = Math.max(0, Math.floor(y2t(latMax))), ty1 = Math.min(n - 1, Math.floor(y2t(latMin)), ty0 + 24);
+    const out: { tx: number; ty: number; z: number }[] = [];
+    for (let tx = tx0; tx <= tx1; tx++) for (let ty = ty0; ty <= ty1; ty++) out.push({ tx: ((tx % n) + n) % n, ty, z });
+    return out;
+  }, [mapMode, tf, proj]);
 
   // programmatic focus
   useEffect(() => {
     if (!focus) return;
-    const p = projection([focus.lon, focus.lat]);
+    const p = proj([focus.lon, focus.lat]);
     if (!p) return;
     setTf({ k: focus.k, x: W / 2 - p[0] * focus.k, y: H / 2 - p[1] * focus.k });
     setFocus(null);
-  }, [focus, setFocus]);
+  }, [focus, setFocus, proj]);
 
   const toVB = (e: { clientX: number; clientY: number }): [number, number] => {
     const r = svgRef.current!.getBoundingClientRect();
@@ -50,14 +94,31 @@ export default function WorldMap({ mission, heightClass = "h-full" }: { mission?
   };
 
   const onMove = (e: React.PointerEvent) => {
-    if (drag) {
-      const [px, py] = toVB(e);
+    const [px, py] = toVB(e);
+    if (mapMode === "globe" && rotDrag.current) {
+      const [lon, lat] = proj.invert?.([px, py]) ?? [0, 0];
+      setRotation([
+        rotDrag.current.r[0] - (lon - rotDrag.current.lon),
+        clamp(rotDrag.current.r[1] + (lat - rotDrag.current.lat), -85, 85),
+        0,
+      ]);
+    } else if (drag) {
       setTf((t) => ({ ...t, x: drag.x + (px - drag.px), y: drag.y + (py - drag.py) }));
     }
-    const [px, py] = toVB(e);
-    const inv = projection.invert?.([(px - tf.x) / tf.k, (py - tf.y) / tf.k]);
+    const inv = proj.invert?.([(px - tf.x) / tf.k, (py - tf.y) / tf.k]);
     if (inv && Math.abs(inv[0]) <= 180 && Math.abs(inv[1]) <= 86) setCursor({ lat: inv[1], lon: inv[0] });
     else setCursor(null);
+  };
+
+  const onDown = (e: React.PointerEvent) => {
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+    const [px, py] = toVB(e);
+    if (mapMode === "globe") {
+      const c = proj.invert?.([px, py]);
+      if (c) rotDrag.current = { lon: c[0], lat: c[1], r: proj.rotate() as [number, number, number] };
+    } else {
+      setDrag({ px, py, x: tf.x, y: tf.y });
+    }
   };
 
   const zoomBy = (f: number) => setTf(({ k, x, y }) => {
@@ -65,7 +126,10 @@ export default function WorldMap({ mission, heightClass = "h-full" }: { mission?
     return { k: k2, x: W / 2 - ((W / 2 - x) * k2) / k, y: H / 2 - ((H / 2 - y) * k2) / k };
   });
 
-  const P = (lon: number, lat: number): [number, number] | null => projection([lon, lat]) as [number, number] | null;
+  const P = (lon: number, lat: number): [number, number] | null => {
+    if (!visible(lon, lat)) return null;
+    return proj([lon, lat]) as [number, number] | null;
+  };
   const M = (lon: number, lat: number, node: React.ReactNode, key: string) => {
     const p = P(lon, lat);
     if (!p) return null;
@@ -82,7 +146,7 @@ export default function WorldMap({ mission, heightClass = "h-full" }: { mission?
   );
 
   // scale bar
-  const kmPerPx = 111 / (219 * (Math.PI / 180)) / tf.k;
+  const kmPerPx = 111 / (proj.scale() * (Math.PI / 180)) / tf.k;
   const scaleKm = [2000, 1000, 500, 250, 100].find((km) => km / kmPerPx <= 170) ?? 100;
 
   const s = 1 / tf.k;
@@ -96,10 +160,10 @@ export default function WorldMap({ mission, heightClass = "h-full" }: { mission?
       <svg
         ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full h-full block cursor-crosshair select-none touch-none"
         onWheel={onWheel}
-        onPointerDown={(e) => { const [px, py] = toVB(e); setDrag({ px, py, x: tf.x, y: tf.y }); (e.target as Element).setPointerCapture?.(e.pointerId); }}
+        onPointerDown={onDown}
         onPointerMove={onMove}
-        onPointerUp={() => setDrag(null)}
-        onPointerLeave={() => { setDrag(null); setCursor(null); }}
+        onPointerUp={() => { setDrag(null); rotDrag.current = null; }}
+        onPointerLeave={() => { setDrag(null); rotDrag.current = null; setCursor(null); }}
       >
         <defs>
           <radialGradient id="fireGlow">
@@ -111,16 +175,44 @@ export default function WorldMap({ mission, heightClass = "h-full" }: { mission?
             <stop offset="80%" stopColor="#ff5d5d" stopOpacity="0.05" />
             <stop offset="100%" stopColor="#ff5d5d" stopOpacity="0" />
           </radialGradient>
+          <radialGradient id="globeShade" cx="38%" cy="32%" r="80%">
+            <stop offset="0%" stopColor="#1e3a55" />
+            <stop offset="55%" stopColor="#0e1a29" />
+            <stop offset="100%" stopColor="#070d15" />
+          </radialGradient>
         </defs>
 
+        {/* SATELLITE basemap — screen-space ESRI World Imagery tiles */}
+        {mapMode === "satellite" && (
+          <g>
+            {satTiles.map((t) => {
+              const n = 2 ** t.z;
+              const tileProjSide = (2 * Math.PI * proj.scale()) / n;
+              const side = tileProjSide * tf.k;
+              const lon = (t.tx / n) * 360 - 180;
+              const lat = (Math.atan(Math.sinh(Math.PI * (1 - (2 * t.ty) / n))) * 180) / Math.PI;
+              const p = proj([lon, lat]);
+              if (!p) return null;
+              return (
+                <image key={`${t.z}-${t.tx}-${t.ty}`} href={`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${t.z}/${t.ty}/${t.tx}`}
+                  x={p[0] * tf.k + tf.x} y={p[1] * tf.k + tf.y} width={side + 0.5} height={side + 0.5} preserveAspectRatio="none" />
+              );
+            })}
+            <rect x="0" y="0" width={W} height={H} fill="#06090f" opacity="0.16" pointerEvents="none" />
+          </g>
+        )}
+
         <g transform={`translate(${tf.x},${tf.y}) scale(${tf.k})`} style={{ transition: drag ? "none" : "transform 0.7s cubic-bezier(0.22,0.9,0.24,1)" }}>
-          <path d={gratD} fill="none" stroke="#142233" strokeWidth={0.5 * s} />
-          <path d={landD} fill="#101c2b" stroke="#24394f" strokeWidth={0.7 * s} />
-          <path d={bordersD} fill="none" stroke="#1d3049" strokeWidth={0.4 * s} />
+          {mapMode === "globe" && (
+            <circle cx={W / 2} cy={H / 2} r={proj.scale()} fill="url(#globeShade)" stroke="#2c445f" strokeWidth={1 * s} />
+          )}
+          <path d={grat} fill="none" stroke={mapMode === "satellite" ? "#2a3f55" : "#142233"} strokeWidth={0.5 * s} opacity={mapMode === "satellite" ? 0.35 : 1} />
+          <path d={land} fill={mapMode === "satellite" ? "none" : "#101c2b"} stroke={mapMode === "satellite" ? "#7fa8c9" : "#24394f"} strokeWidth={0.7 * s} opacity={mapMode === "satellite" ? 0.5 : 1} />
+          <path d={borders} fill="none" stroke={mapMode === "satellite" ? "#9dc3e0" : "#1d3049"} strokeWidth={0.4 * s} opacity={mapMode === "satellite" ? 0.45 : 1} />
 
           {/* ---- CONFLICT ZONES ---- */}
           {layers.conflicts && sim.conflicts.map((c) => {
-            const d = path(circleGen.center([c.lon, c.lat]).radius(c.rKm / 111)() as any);
+            const d = pather(circleGen.center([c.lon, c.lat]).radius(c.rKm / 111)() as any);
             const p = P(c.lon, c.lat);
             return d ? (
               <g key={c.id} className="cursor-pointer" onClick={(e) => { e.stopPropagation(); select({ kind: "conflicts", id: c.id }); }}>

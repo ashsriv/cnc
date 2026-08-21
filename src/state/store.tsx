@@ -1,8 +1,8 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import type { SimState, View, LayerKey, Sel, UavMode, Waypoint, Rally, WatchRule, Alert, SourceKey, SourceState, Ship, Flight, FeedTelemetry } from "../lib/types";
+import type { SimState, View, LayerKey, Sel, UavMode, Waypoint, Rally, WatchRule, Alert, SourceKey, SourceState, Ship, Flight, FeedTelemetry, SpaceData, MarketCoin, MapMode } from "../lib/types";
 import { initSim, stepSim } from "../lib/sim";
 import { hexId } from "../lib/geo";
-import { initState, fetchQuakes, fetchFires, fetchNews, fetchFlights, fetchAdlFlights, fetchSatRecs, propagateSats, type SatRec } from "../lib/live";
+import { initState, fetchQuakes, fetchFires, fetchNews, fetchFlights, fetchAdlFlights, fetchSatRecs, propagateSats, fetchSolarWeather, fetchMarkets, type SatRec } from "../lib/live";
 import { loadVault, saveVault } from "../services/vault";
 
 interface Store {
@@ -26,6 +26,8 @@ interface Store {
   sources: Record<SourceKey, SourceState>;
   setSource: (k: SourceKey, v: SourceState) => void;
   feedTelemetry: Record<string, FeedTelemetry>;
+  spaceData: SpaceData | null; marketsData: MarketCoin[];
+  mapMode: MapMode; setMapMode: (m: MapMode) => void;
   aisKey: string; saveAisKey: (k: string) => void;
   aisRegions: string[]; toggleAisRegion: (r: string) => void;
   settingsOpen: boolean; setSettingsOpen: (v: boolean) => void;
@@ -199,15 +201,42 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       } catch { if (!stop) setSource("CELESTRAK", "SIM"); }
     };
 
-    usgs(); eonet(); gdelt(); tle();
+    // NOAA SWPC solar weather — every 90 s
+    const swpc = async () => {
+      try {
+        const t0 = performance.now();
+        const d = await fetchSolarWeather();
+        if (stop) return;
+        reportFeed("SWPC", d.kp.length + d.xray.length + d.wind.length, performance.now() - t0, true);
+        setSpaceData(d);
+        setSource("SWPC", "LIVE");
+      } catch { if (!stop) { reportFeed("SWPC", 0, 0, false); setSource("SWPC", "SIM"); } }
+    };
+
+    // CoinGecko crypto markets — every 60 s
+    const markets = async () => {
+      try {
+        const t0 = performance.now();
+        const list = await fetchMarkets();
+        if (stop) return;
+        reportFeed("COINGECKO", list.length, performance.now() - t0, true);
+        setMarketsData(list);
+        setSource("COINGECKO", "LIVE");
+      } catch { if (!stop) { reportFeed("COINGECKO", 0, 0, false); setSource("COINGECKO", "SIM"); } }
+    };
+
+    usgs(); eonet(); gdelt(); tle(); swpc();
     setTimeout(adl, 1200);
     setTimeout(opensky, 30000);
+    setTimeout(markets, 4000);
     const ids = [
       window.setInterval(usgs, 120000),
       window.setInterval(eonet, 180000),
       window.setInterval(gdelt, 100000),
       window.setInterval(adl, 15000),
       window.setInterval(opensky, 60000),
+      window.setInterval(swpc, 90000),
+      window.setInterval(markets, 60000),
     ];
     return () => { stop = true; ids.forEach(clearInterval); };
   }, []);
@@ -229,6 +258,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     } catch { return ["MED", "ARABIAN_SEA"]; }
   });
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [spaceData, setSpaceData] = useState<SpaceData | null>(null);
+  const [marketsData, setMarketsData] = useState<MarketCoin[]>([]);
+  const [mapMode, setMapMode] = useState<MapMode>("vector");
   const liveShips = useRef(new Map<string, Ship>());
   const dirtyRef = useRef(false);
   const wsRef = useRef<WebSocket | null>(null);
@@ -312,6 +344,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     focus, setFocus,
     sources, setSource,
     feedTelemetry,
+    spaceData, marketsData,
+    mapMode, setMapMode,
     aisKey, saveAisKey, aisRegions, toggleAisRegion, settingsOpen, setSettingsOpen,
     uavCmd: (id, cmd) =>
       mutateSim((s) => ({

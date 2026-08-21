@@ -1,5 +1,5 @@
 import { twoline2satrec, propagate, gstime, eciToGeodetic, degreesLat, degreesLong } from "satellite.js";
-import type { Fire, Flight, NewsItem, Quake, Sat, SourceKey, SourceState } from "./types";
+import type { Fire, Flight, MarketCoin, NewsItem, Quake, Sat, SourceKey, SourceState, SpaceData } from "./types";
 import { hashStr } from "./geo";
 
 /* ------------------------------------------------------------------ */
@@ -39,12 +39,14 @@ export const SOURCE_META: { k: SourceKey; label: string; feed: string }[] = [
   { k: "CELESTRAK", label: "TLE/SGP4", feed: "CelesTrak orbits · propagated" },
   { k: "AISSTREAM", label: "AIS WS", feed: "AISStream WebSocket · operator key" },
   { k: "BLOCKCHAIR", label: "CHAIN", feed: "On-chain ledger queries" },
+  { k: "SWPC", label: "SWPC", feed: "NOAA solar weather · X-ray / Kp / wind" },
+  { k: "COINGECKO", label: "MKT", feed: "CoinGecko crypto quotes + OHLC" },
 ];
 
-export const ALL_SOURCES: SourceKey[] = ["USGS", "EONET", "GDELT", "ADL", "OPENSKY", "CELESTRAK", "AISSTREAM", "BLOCKCHAIR"];
+export const ALL_SOURCES: SourceKey[] = ["USGS", "EONET", "GDELT", "ADL", "OPENSKY", "CELESTRAK", "AISSTREAM", "BLOCKCHAIR", "SWPC", "COINGECKO"];
 
 export function initState(): Record<SourceKey, SourceState> {
-  return { USGS: "CONNECTING", EONET: "CONNECTING", GDELT: "CONNECTING", OPENSKY: "CONNECTING", ADL: "CONNECTING", CELESTRAK: "CONNECTING", AISSTREAM: "STANDBY", BLOCKCHAIR: "STANDBY" };
+  return { USGS: "CONNECTING", EONET: "CONNECTING", GDELT: "CONNECTING", OPENSKY: "CONNECTING", ADL: "CONNECTING", CELESTRAK: "CONNECTING", SWPC: "CONNECTING", COINGECKO: "CONNECTING", AISSTREAM: "STANDBY", BLOCKCHAIR: "STANDBY" };
 }
 
 /* ------------------------------------------------------------------ */
@@ -388,4 +390,89 @@ export async function fetchAddress(chain: "BTC" | "ETH", address: string): Promi
     firstSeen: a.first_seen_receiving ?? undefined,
     txs,
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* NOAA SWPC solar weather — keyless, CORS-friendly                    */
+/* ------------------------------------------------------------------ */
+
+function fluxClass(f: number): string {
+  if (f >= 1e-4) return "X-CLASS FLARE";
+  if (f >= 1e-5) return "M-CLASS FLARE";
+  if (f >= 1e-6) return "C-CLASS FLARE";
+  if (f >= 1e-7) return "B-CLASS";
+  return "A-CLASS · QUIET";
+}
+function stormClass(kp: number): string {
+  if (kp >= 9) return "G5 · EXTREME";
+  if (kp >= 8.33) return "G4 · SEVERE";
+  if (kp >= 8) return "G3 · STRONG";
+  if (kp >= 7) return "G2 · MODERATE";
+  if (kp >= 6.67) return "G1 · MINOR";
+  if (kp >= 5) return "STORM WATCH";
+  return "QUIET";
+}
+
+export async function fetchSolarWeather(): Promise<SpaceData> {
+  const [xrayJ, kpJ, windJ] = await Promise.all([
+    getJSON("https://services.swpc.noaa.gov/json/xray-5-min.json", 9000),
+    getJSON("https://services.swpc.noaa.gov/json/noaa-planetary-k-index.json", 9000),
+    getJSON("https://services.swpc.noaa.gov/json/solar-wind/plasma-2-hour.json", 9000),
+  ]);
+
+  const xray: { t: string; flux: number }[] = (Array.isArray(xrayJ) ? xrayJ : [])
+    .filter((r: any) => r && typeof r.flux === "number")
+    .slice(-40)
+    .map((r: any) => ({ t: String(r.time_tag ?? ""), flux: +r.flux }));
+
+  const kpRows = (Array.isArray(kpJ) ? kpJ : []).slice(1).filter((r: any) => Array.isArray(r));
+  const kp: { t: string; kp: number }[] = kpRows
+    .map((r: any) => ({ t: String(r[0] ?? ""), kp: Number(r[1]) }))
+    .filter((r) => isFinite(r.kp))
+    .slice(-40);
+
+  const windRows = (Array.isArray(windJ) ? windJ : []).filter((r: any) => r && typeof r.speed === "number");
+  const wind: { t: string; speed: number; density: number; temp: number }[] = windRows
+    .slice(-40)
+    .map((r: any) => ({ t: String(r.time_tag ?? ""), speed: +r.speed, density: +r.density, temp: +r.temperature }));
+
+  const fluxNow = xray.length ? xray[xray.length - 1].flux : 0;
+  const kpNow = kp.length ? kp[kp.length - 1].kp : 0;
+  const speedNow = wind.length ? wind[wind.length - 1].speed : 0;
+
+  if (!xray.length && !kp.length && !wind.length) throw new Error("swpc unreachable");
+
+  return { xray, kp, wind, kpNow, fluxNow, speedNow, flare: fluxClass(fluxNow), storm: stormClass(kpNow) };
+}
+
+/* ------------------------------------------------------------------ */
+/* CoinGecko crypto markets — keyless, CORS-friendly                   */
+/* ------------------------------------------------------------------ */
+
+const COIN_LIST = "bitcoin,ethereum,solana,binancecoin,cardano,ripple,dogecoin,polkadot";
+
+export async function fetchMarkets(): Promise<MarketCoin[]> {
+  const j = await getJSON(
+    `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${COIN_LIST}&order=market_cap_desc&sparkline=true&price_change_percentage=24h`,
+    10000,
+  );
+  if (!Array.isArray(j) || j.length === 0) throw new Error("coingecko unreachable");
+  return j.map((c: any) => ({
+    id: String(c.id),
+    symbol: String(c.symbol ?? "").toUpperCase(),
+    name: String(c.name ?? ""),
+    price: +c.current_price,
+    change24h: +(c.price_change_percentage_24h ?? 0),
+    spark: (c.sparkline_in_7d?.price ?? []).slice(-48),
+    ohlc: [] as [number, number, number, number, number][],
+  }));
+}
+
+export async function fetchOhlc(coinId: string, days: number): Promise<[number, number, number, number, number][]> {
+  const j = await getJSON(
+    `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}/ohlc?vs_currency=usd&days=${days}`,
+    10000,
+  );
+  if (!Array.isArray(j)) throw new Error("ohlc unreachable");
+  return j.filter((r: any) => Array.isArray(r) && r.length >= 5).map((r: any) => [+r[0], +r[1], +r[2], +r[3], +r[4]]);
 }
